@@ -1,0 +1,5 @@
+$env:NODE_ID        = "node1"
+$env:PORT           = "3001"
+$env:COORDINATOR_ID = "node1"
+$env:PEERS          = ""
+node "$PSScriptRoot\..\dist\server.js"

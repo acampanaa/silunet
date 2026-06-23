@@ -1,0 +1,18 @@
+{
+  "name": "quorum",
+  "version": "1.0.0",
+  "description": "Juego de adivinanza de siluetas en tiempo real",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

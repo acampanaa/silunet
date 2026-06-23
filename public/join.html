@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Quórum — Únete</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: #0f0f1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #f0f0f0;
+      padding: 16px;
+    }
+    .card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 20px;
+      padding: 48px 36px;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: -2px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.9rem;
+      margin-bottom: 40px;
+    }
+    label {
+      display: block;
+      text-align: left;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-bottom: 8px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    input {
+      width: 100%;
+      padding: 14px 18px;
+      background: #0f0f1a;
+      border: 2px solid #2a2a4a;
+      border-radius: 12px;
+      color: #f0f0f0;
+      font-size: 1.1rem;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s;
+      margin-bottom: 16px;
+    }
+    input:focus { border-color: #7c3aed; }
+    input::placeholder { color: #4b5563; }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      border: none;
+      border-radius: 12px;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:hover  { opacity: 0.92; }
+    button:active { transform: scale(0.98); }
+    .err {
+      color: #ef4444;
+      font-size: 0.875rem;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>QUÓRUM</h1>
+    <p class="subtitle">Adivina la silueta tecnológica</p>
+    <label for="nick">Tu apodo</label>
+    <input id="nick" type="text" placeholder="ej. TechMaster99"
+           maxlength="20" autocomplete="off" autofocus>
+    <button onclick="join()">Unirse a la partida</button>
+    <p class="err" id="err"></p>
+  </div>
+
+  <script>
+    document.getElementById('nick').addEventListener('keydown', e => {
+      if (e.key === 'Enter') join();
+    });
+
+    function join() {
+      const nick = document.getElementById('nick').value.trim();
+      if (!nick) {
+        document.getElementById('err').textContent = 'Escribe tu apodo antes de continuar.';
+        return;
+      }
+      sessionStorage.setItem('quorum_nick', nick);
+      window.location.href = '/play';
+    }
+  </script>
+</body>
+</html>

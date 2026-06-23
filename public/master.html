@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quórum — Pantalla Maestra</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: #0f0f1a;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: #1a1a2e;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .logo { font-size: 1.6rem; font-weight: 900; letter-spacing: -1px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .nodes {
+      display: flex; gap: 8px; align-items: center; font-size: 0.8rem; color: #6b7280;
+    }
+    .node-dot {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #0f0f1a; border: 1px solid #2a2a4a; border-radius: 20px;
+      padding: 3px 10px; font-size: 0.75rem;
+    }
+    .node-dot .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot.ok   { background: #10b981; box-shadow: 0 0 6px #10b981; }
+    .dot.down { background: #6b7280; }
+
+    /* ── Main layout ── */
+    main {
+      flex: 1; display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 24px;
+      padding: 24px 28px;
+      align-items: start;
+    }
+
+    /* ── Left: juego ── */
+    .game-panel { display: flex; flex-direction: column; gap: 18px; align-items: center; }
+    .round-info { font-size: 0.85rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
+    .cat-badge {
+      background: #1a1a2e; border: 1px solid #06b6d4; border-radius: 20px;
+      padding: 5px 18px; color: #06b6d4; font-size: 0.85rem; font-weight: 600;
+    }
+    .silhouette-box {
+      width: 280px; height: 280px;
+      background: #1a1a2e; border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      color: #f0f0f0;
+    }
+    .silhouette-box svg { width: 220px; height: 220px; }
+    .hidden-word {
+      font-size: 2.8rem; font-weight: 900; letter-spacing: 12px;
+      color: #f0f0f0; font-family: monospace;
+    }
+    .hidden-word .revealed { color: #06b6d4; }
+
+    /* Timer */
+    .timer-row { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 480px; }
+    .timer-bar-bg { flex: 1; height: 10px; background: #2a2a4a; border-radius: 5px; overflow: hidden; }
+    .timer-bar { height: 100%; background: linear-gradient(90deg, #7c3aed, #06b6d4);
+      border-radius: 5px; transition: width 0.9s linear; }
+    .timer-bar.urgent { background: #ef4444; }
+    .timer-num { font-size: 1.4rem; font-weight: 800; min-width: 40px; text-align: right; }
+
+    /* Notif */
+    .master-notif {
+      font-size: 1rem; font-weight: 600; color: #10b981;
+      min-height: 1.5rem; text-align: center;
+    }
+
+    /* ── Right: ranking ── */
+    .rank-panel { display: flex; flex-direction: column; gap: 10px; }
+    .rank-header { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; }
+    .rank-list { display: flex; flex-direction: column; gap: 6px; }
+    .rank-row {
+      display: flex; align-items: center; gap: 10px;
+      background: #1a1a2e; border-radius: 10px; padding: 12px 14px;
+      font-size: 0.95rem;
+    }
+    .rank-row.top1 { border: 1px solid #fbbf24; background: rgba(251,191,36,0.08); }
+    .rank-row.top2 { border: 1px solid #9ca3af; background: rgba(156,163,175,0.08); }
+    .rank-row.top3 { border: 1px solid #b45309; background: rgba(180,83,9,0.08); }
+    .rank-pos { font-size: 1.2rem; min-width: 28px; }
+    .rank-nick { flex: 1; font-weight: 600; }
+    .rank-score { font-weight: 700; color: #06b6d4; }
+
+    /* ── Footer: controles ── */
+    footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: #1a1a2e;
+      border-top: 1px solid #2a2a4a;
+      gap: 16px;
+    }
+    .player-info { font-size: 0.9rem; color: #9ca3af; }
+    .player-info strong { color: #f0f0f0; }
+    .ctrl-btns { display: flex; gap: 10px; }
+    .rounds-input {
+      padding: 8px 12px;
+      background: #0f0f1a; border: 1px solid #2a2a4a; border-radius: 8px;
+      color: #f0f0f0; font-size: 0.9rem; width: 80px; text-align: center;
+    }
+    .btn-start {
+      padding: 10px 24px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      border: none; border-radius: 10px;
+      color: #fff; font-size: 0.95rem; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn-start:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-start:hover:not(:disabled) { opacity: 0.9; }
+    .phase-badge {
+      padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+      background: #2a2a4a; color: #9ca3af;
+    }
+    .phase-badge.playing { background: rgba(16,185,129,0.15); color: #10b981; }
+    .phase-badge.gameEnd { background: rgba(251,191,36,0.15); color: #fbbf24; }
+
+    /* ── Waiting overlay ── */
+    .waiting-center { display: flex; flex-direction: column; align-items: center; justify-content: center;
+      flex: 1; gap: 16px; }
+    .big-logo { font-size: 5rem; font-weight: 900; letter-spacing: -4px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .qr-block {
+      display: flex; align-items: center; gap: 24px;
+      background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 16px;
+      padding: 20px 28px;
+    }
+    #qr-canvas { background: #fff; border-radius: 8px; padding: 8px; }
+    .qr-info { display: flex; flex-direction: column; gap: 6px; }
+    .qr-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.08em; }
+    .qr-url { font-size: 1rem; font-weight: 700; color: #06b6d4; letter-spacing: 0.02em; }
+    .qr-hint { font-size: 0.8rem; color: #6b7280; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">QUÓRUM</div>
+  <div class="nodes" id="node-status">
+    <!-- Eje 4: panel de salud del clúster — placeholder hasta implementar heartbeats -->
+    <div class="node-dot"><span class="dot ok"></span>node1</div>
+    <div class="node-dot"><span class="dot down"></span>node2</div>
+    <div class="node-dot"><span class="dot down"></span>node3</div>
+  </div>
+</header>
+
+<main id="main-waiting" style="display:flex; align-items:center; justify-content:center; grid-template-columns:1fr;">
+  <div class="waiting-center">
+    <div class="big-logo">QUÓRUM</div>
+    <p style="color:#6b7280; font-size:1.1rem">Esperando jugadores...</p>
+    <div class="qr-block">
+      <div id="qr-canvas"></div>
+      <div class="qr-info">
+        <span class="qr-label">Escanea para unirte</span>
+        <span class="qr-url" id="qr-url-text">Cargando URL...</span>
+        <span class="qr-hint">Misma red Wi-Fi</span>
+      </div>
+    </div>
+    <p style="color:#06b6d4; font-size:1.5rem; font-weight:700" id="m-count">0 jugadores</p>
+  </div>
+</main>
+
+<main id="main-game" style="display:none;">
+  <!-- Panel izquierdo: juego -->
+  <div class="game-panel">
+    <p class="round-info" id="m-round">Ronda 1 / 10</p>
+    <div class="cat-badge" id="m-cat">Categoría</div>
+    <div class="silhouette-box" id="m-svg"></div>
+    <div class="hidden-word" id="m-word"></div>
+    <div class="timer-row">
+      <div class="timer-bar-bg"><div class="timer-bar" id="m-bar" style="width:100%"></div></div>
+      <div class="timer-num" id="m-timer">24</div>
+    </div>
+    <div class="master-notif" id="m-notif"></div>
+  </div>
+
+  <!-- Panel derecho: ranking -->
+  <div class="rank-panel">
+    <p class="rank-header">Ranking en vivo</p>
+    <div class="rank-list" id="m-ranking">
+      <p style="color:#6b7280; font-size:0.875rem">Sin datos aún...</p>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="player-info">
+    Jugadores: <strong id="f-count">0</strong>
+    &nbsp;|&nbsp;
+    Estado: <span class="phase-badge" id="f-phase">Esperando</span>
+  </div>
+  <div class="ctrl-btns">
+    <input class="rounds-input" id="rounds-input" type="number" value="10" min="1" max="12" title="Número de rondas">
+    <button class="btn-start" id="btn-start" onclick="startGame()">Iniciar partida</button>
+  </div>
+</footer>
+
+<script>
+  let totalTime   = 24;
+
+  // Cargar info del nodo y actualizar panel de salud del clúster
+  function loadNodeInfo() {
+    fetch('/api/info')
+      .then(r => r.json())
+      .then(info => {
+        // QR y URL
+        document.getElementById('qr-url-text').textContent = info.joinUrl;
+        if (!document.getElementById('qr-canvas').hasChildNodes()) {
+          new QRCode(document.getElementById('qr-canvas'), {
+            text: info.joinUrl, width: 128, height: 128,
+            colorDark: '#000000', colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M,
+          });
+        }
+        // Panel de nodos (Eje 4 — por ahora muestra peers conectados)
+        const known = ['node1','node2','node3'];
+        const connected = new Set([info.nodeId, ...info.connectedPeers]);
+        document.getElementById('node-status').innerHTML = known.map(n => {
+          const ok = connected.has(n);
+          const isCoord = n === info.coordinator;
+          const label = isCoord ? `${n} ★` : n;
+          return `<div class="node-dot"><span class="dot ${ok ? 'ok' : 'down'}"></span>${label}</div>`;
+        }).join('');
+      })
+      .catch(() => {
+        document.getElementById('qr-url-text').textContent = 'Sin conexión al servidor';
+      });
+  }
+
+  loadNodeInfo();
+  setInterval(loadNodeInfo, 3000); // refrescar panel de nodos cada 3s
+  let notifTimer  = null;
+  let currentPhase = 'waiting';
+
+  const ws = new WebSocket('ws://' + location.host);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'MASTER_JOIN' }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    switch (msg.type) {
+      case 'PLAYER_COUNT':   handlePlayerCount(msg);   break;
+      case 'ROUND_START':    handleRoundStart(msg);    break;
+      case 'TICK':           handleTick(msg);          break;
+      case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
+      case 'ROUND_END':      handleRoundEnd(msg);      break;
+      case 'RANKING':        handleRanking(msg);       break;
+    }
+  };
+
+  function send(msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+  function handlePlayerCount(msg) {
+    document.getElementById('m-count').textContent = msg.count + ' jugador' + (msg.count === 1 ? '' : 'es');
+    document.getElementById('f-count').textContent = msg.count;
+    document.getElementById('btn-start').disabled = msg.count === 0;
+  }
+
+  function handleRoundStart(msg) {
+    totalTime = msg.totalTime;
+    currentPhase = 'playing';
+    document.getElementById('m-round').textContent = `Ronda ${msg.roundNumber} / ${msg.totalRounds}`;
+    document.getElementById('m-cat').textContent   = msg.category;
+    document.getElementById('m-svg').innerHTML     = msg.svg;
+    renderHiddenWord(msg.hiddenWord, 'm-word');
+    updateTimer(msg.timeLeft, msg.totalTime);
+    clearNotif();
+    setPhase('playing');
+    document.getElementById('main-waiting').style.display = 'none';
+    document.getElementById('main-game').style.display    = 'grid';
+    document.getElementById('btn-start').disabled = true;
+  }
+
+  function handleTick(msg) {
+    updateTimer(msg.timeLeft, totalTime);
+    renderHiddenWord(msg.hiddenWord, 'm-word');
+  }
+
+  function handleCorrectAnswer(msg) {
+    // Eje 2: mostrar el timestamp Lamport del evento en la pantalla maestra
+    showNotif(`${msg.nick} acertó! +${msg.points} pts  [L=${msg.lamport}]`, 3500);
+  }
+
+  function handleRoundEnd(msg) {
+    clearNotif();
+    document.getElementById('m-word').innerHTML =
+      msg.word.split('').map(c =>
+        `<span class="revealed">${c}</span>`
+      ).join('<span style="letter-spacing:0"> </span>');
+    // Eje 2: mostrar orden de aciertos con timestamps Lamport
+    if (msg.solvers.length > 0) {
+      const orderText = msg.solvers.map((s, i) =>
+        `#${i+1} ${s.nick} [L=${s.lamport}]`
+      ).join('  ·  ');
+      showNotif(orderText, 0);
+    }
+    setPhase('roundEnd');
+  }
+
+  function handleRanking(msg) {
+    renderRanking(msg.entries);
+    if (msg.final) {
+      currentPhase = 'gameEnd';
+      setPhase('gameEnd');
+      document.getElementById('btn-start').disabled = false;
+      document.getElementById('btn-start').textContent = 'Nueva partida';
+    }
+  }
+
+  function startGame() {
+    const rounds = parseInt(document.getElementById('rounds-input').value) || 10;
+    send({ type: 'START_GAME', totalRounds: rounds });
+    document.getElementById('btn-start').disabled = true;
+  }
+
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+  function renderHiddenWord(hw, elId) {
+    const chars = hw.split(' ');
+    document.getElementById(elId).innerHTML = chars.map(c =>
+      c === '_'
+        ? `<span>_</span>`
+        : `<span class="revealed">${c}</span>`
+    ).join('<span style="letter-spacing:0"> </span>');
+  }
+
+  function updateTimer(t, total) {
+    document.getElementById('m-timer').textContent = t;
+    const bar = document.getElementById('m-bar');
+    bar.style.width = ((t / total) * 100) + '%';
+    bar.classList.toggle('urgent', t <= 6);
+  }
+
+  function showNotif(text, duration = 3000) {
+    clearTimeout(notifTimer);
+    document.getElementById('m-notif').textContent = text;
+    if (duration > 0) notifTimer = setTimeout(clearNotif, duration);
+  }
+  function clearNotif() { document.getElementById('m-notif').textContent = ''; }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const topClass = ['top1', 'top2', 'top3'];
+
+  function renderRanking(entries) {
+    document.getElementById('m-ranking').innerHTML = entries.map((e, i) =>
+      `<div class="rank-row ${topClass[i] ?? ''}">
+        <span class="rank-pos">${medals[i] ?? '#' + (i+1)}</span>
+        <span class="rank-nick">${e.nick}</span>
+        <span class="rank-score">${e.score} pts</span>
+      </div>`
+    ).join('') || '<p style="color:#6b7280;font-size:0.875rem">Sin jugadores aún.</p>';
+  }
+
+  function setPhase(p) {
+    const el = document.getElementById('f-phase');
+    const labels = { waiting: 'Esperando', playing: 'En juego', roundEnd: 'Entre rondas', gameEnd: 'Terminado' };
+    el.textContent = labels[p] ?? p;
+    el.className = 'phase-badge ' + (p === 'playing' ? 'playing' : p === 'gameEnd' ? 'gameEnd' : '');
+  }
+</script>
+</body>
+</html>

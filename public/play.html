@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Quórum — Juego</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: #0f0f1a;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Pantalla genérica ── */
+    .screen { width: 100%; max-width: 460px; padding: 24px 16px; display: none; flex-direction: column; align-items: center; }
+    .screen.active { display: flex; }
+
+    /* ── Connecting ── */
+    #s-connecting { justify-content: center; min-height: 100vh; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid #2a2a4a;
+      border-top-color: #7c3aed;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner-label { margin-top: 16px; color: #6b7280; }
+
+    /* ── Waiting ── */
+    #s-waiting { justify-content: center; min-height: 100vh; text-align: center; gap: 16px; }
+    .logo { font-size: 2.4rem; font-weight: 900; letter-spacing: -2px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .wait-msg { color: #9ca3af; font-size: 1rem; }
+    .player-count { font-size: 1.5rem; font-weight: 700; color: #06b6d4; }
+
+    /* ── Playing ── */
+    #s-playing { gap: 12px; padding-bottom: 32px; }
+    .round-header { display: flex; justify-content: space-between; width: 100%;
+      font-size: 0.8rem; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .category-tag { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px;
+      padding: 4px 14px; font-size: 0.8rem; color: #06b6d4; }
+    .silhouette-box {
+      width: 200px; height: 200px;
+      background: #1a1a2e;
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      color: #f0f0f0;
+    }
+    .silhouette-box svg { width: 150px; height: 150px; }
+    .hidden-word {
+      font-size: 2rem; font-weight: 800; letter-spacing: 10px;
+      color: #f0f0f0; text-align: center; font-family: monospace;
+      min-height: 2.5rem;
+    }
+    .hidden-word .revealed { color: #06b6d4; }
+
+    /* Timer */
+    .timer-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+    .timer-bar-bg { flex: 1; height: 8px; background: #2a2a4a; border-radius: 4px; overflow: hidden; }
+    .timer-bar { height: 100%; background: linear-gradient(90deg, #7c3aed, #06b6d4);
+      border-radius: 4px; transition: width 0.9s linear, background 0.5s; }
+    .timer-bar.urgent { background: #ef4444; }
+    .timer-num { font-size: 1.1rem; font-weight: 700; color: #f0f0f0; min-width: 32px; text-align: right; }
+
+    /* Notificación */
+    .notif {
+      width: 100%; padding: 10px 16px; border-radius: 10px;
+      font-weight: 600; font-size: 0.9rem; text-align: center;
+      display: none; animation: fadeIn 0.2s ease;
+    }
+    .notif.success { background: rgba(16,185,129,0.15); border: 1px solid #10b981; color: #10b981; display: block; }
+    .notif.error   { background: rgba(239,68,68,0.15);  border: 1px solid #ef4444;  color: #ef4444;  display: block; }
+    .notif.info    { background: rgba(6,182,212,0.15);  border: 1px solid #06b6d4;  color: #06b6d4;  display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+    /* Input */
+    .guess-form { display: flex; gap: 8px; width: 100%; }
+    .guess-form input {
+      flex: 1; padding: 14px 16px;
+      background: #1a1a2e; border: 2px solid #2a2a4a;
+      border-radius: 12px; color: #f0f0f0; font-size: 1rem;
+      outline: none; transition: border-color 0.2s; text-transform: uppercase;
+    }
+    .guess-form input:focus  { border-color: #7c3aed; }
+    .guess-form input.shake  { animation: shake 0.35s ease; border-color: #ef4444; }
+    .guess-form input:disabled { opacity: 0.4; cursor: not-allowed; }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20%     { transform: translateX(-8px); }
+      60%     { transform: translateX(8px); }
+    }
+    .guess-form button {
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      border: none; border-radius: 12px;
+      color: #fff; font-weight: 700; font-size: 1rem;
+      cursor: pointer; white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .guess-form button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .guess-form button:hover:not(:disabled) { opacity: 0.9; }
+
+    /* Mini ranking */
+    .rank-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; width: 100%; }
+    .rank-list { width: 100%; display: flex; flex-direction: column; gap: 4px; }
+    .rank-row {
+      display: flex; align-items: center; gap: 8px;
+      background: #1a1a2e; border-radius: 8px; padding: 8px 12px;
+      font-size: 0.875rem;
+    }
+    .rank-row.me { border: 1px solid #7c3aed; }
+    .rank-pos { font-weight: 700; color: #6b7280; min-width: 22px; }
+    .rank-nick { flex: 1; }
+    .rank-score { font-weight: 700; color: #06b6d4; }
+
+    /* ── Round End ── */
+    #s-roundEnd { gap: 16px; text-align: center; justify-content: center; min-height: 60vh; }
+    .word-reveal { font-size: 2.5rem; font-weight: 900; color: #06b6d4; letter-spacing: 4px; }
+    .solvers-list { width: 100%; }
+    .solver-row { display: flex; justify-content: space-between;
+      padding: 8px 12px; background: #1a1a2e; border-radius: 8px;
+      margin-bottom: 4px; font-size: 0.9rem; }
+    .no-solvers { color: #6b7280; font-size: 0.9rem; }
+    .next-msg { color: #6b7280; font-size: 0.85rem; }
+
+    /* ── Game End ── */
+    #s-gameEnd { gap: 16px; text-align: center; }
+    .podium-title { font-size: 1.8rem; font-weight: 900; }
+    .final-list { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+    .final-row {
+      display: flex; align-items: center; gap: 10px;
+      background: #1a1a2e; border-radius: 10px; padding: 12px 16px;
+    }
+    .final-row.top1 { background: rgba(251,191,36,0.12); border: 1px solid #fbbf24; }
+    .final-row.top2 { background: rgba(156,163,175,0.12); border: 1px solid #9ca3af; }
+    .final-row.top3 { background: rgba(180,83,9,0.12);  border: 1px solid #b45309; }
+    .medal { font-size: 1.4rem; }
+    .final-nick { flex: 1; font-weight: 600; }
+    .final-score { font-weight: 700; color: #06b6d4; }
+  </style>
+</head>
+<body>
+
+<!-- Pantalla: conectando -->
+<div id="s-connecting" class="screen active">
+  <div class="spinner"></div>
+  <p class="spinner-label">Conectando...</p>
+</div>
+
+<!-- Pantalla: esperando -->
+<div id="s-waiting" class="screen">
+  <div class="logo">QUÓRUM</div>
+  <p class="wait-msg">Esperando que empiece la partida...</p>
+  <div class="player-count" id="w-count">0 jugadores</div>
+</div>
+
+<!-- Pantalla: jugando -->
+<div id="s-playing" class="screen">
+  <div class="round-header">
+    <span id="p-round">Ronda 1/10</span>
+    <span id="p-score">0 pts</span>
+  </div>
+  <div class="category-tag" id="p-category">Categoría</div>
+
+  <div class="silhouette-box" id="p-svg"></div>
+
+  <div class="hidden-word" id="p-word"></div>
+
+  <div class="timer-row">
+    <div class="timer-bar-bg"><div class="timer-bar" id="p-bar" style="width:100%"></div></div>
+    <div class="timer-num" id="p-timer">24</div>
+  </div>
+
+  <div class="notif" id="p-notif"></div>
+
+  <div class="guess-form">
+    <input id="p-input" type="text" placeholder="Escribe tu respuesta..."
+           maxlength="30" autocomplete="off" autocorrect="off" spellcheck="false">
+    <button id="p-btn" onclick="submitGuess()">Enviar</button>
+  </div>
+
+  <p class="rank-title">Ranking</p>
+  <div class="rank-list" id="p-ranking"></div>
+</div>
+
+<!-- Pantalla: fin de ronda -->
+<div id="s-roundEnd" class="screen">
+  <p style="color:#6b7280;font-size:0.9rem">La palabra era</p>
+  <div class="word-reveal" id="re-word"></div>
+  <div class="solvers-list" id="re-solvers"></div>
+  <p class="next-msg" id="re-next">Siguiente ronda en breve...</p>
+</div>
+
+<!-- Pantalla: fin de partida -->
+<div id="s-gameEnd" class="screen">
+  <div class="podium-title">Partida terminada</div>
+  <div class="final-list" id="ge-list"></div>
+</div>
+
+<script>
+  const nick = sessionStorage.getItem('quorum_nick');
+  if (!nick) { window.location.href = '/join'; }
+
+  let myPlayerId  = null;
+  let myNick      = nick;
+  let myScore     = 0;
+  let totalTime   = 24;
+  let solved      = false;
+  let notifTimer  = null;
+
+  // Eje 2: reloj de Lamport del cliente
+  let lamport = 0;
+  function lTick()         { return ++lamport; }
+  function lUpdate(remote) { lamport = Math.max(lamport, remote ?? 0) + 1; }
+
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  const ws = new WebSocket('ws://' + location.host);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'JOIN', nick }));
+  };
+
+  ws.onclose = () => showNotif('Conexión perdida. Recarga la página.', 'error', 0);
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    // Eje 2: sincronizar reloj local con cualquier timestamp del servidor
+    if (msg.lamport != null) lUpdate(msg.lamport);
+    switch (msg.type) {
+      case 'WELCOME':         handleWelcome(msg);       break;
+      case 'PLAYER_COUNT':    handlePlayerCount(msg);   break;
+      case 'ROUND_START':     handleRoundStart(msg);    break;
+      case 'TICK':            handleTick(msg);          break;
+      case 'CORRECT_ANSWER':  handleCorrectAnswer(msg); break;
+      case 'WRONG_ANSWER':    handleWrongAnswer();       break;
+      case 'ALREADY_SOLVED':  /* ignorar */             break;
+      case 'ROUND_END':       handleRoundEnd(msg);      break;
+      case 'RANKING':         handleRanking(msg);       break;
+      case 'ERROR':           showNotif(msg.message, 'error'); break;
+    }
+  };
+
+  function send(msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  function handleWelcome(msg) {
+    myPlayerId = msg.playerId;
+    showScreen('s-waiting');
+    setCount(msg.playerCount);
+  }
+
+  function handlePlayerCount(msg) {
+    setCount(msg.count);
+  }
+
+  function handleRoundStart(msg) {
+    solved = false;
+    totalTime = msg.totalTime;
+    myScore = myScore; // mantener acumulado
+
+    document.getElementById('p-round').textContent    = `Ronda ${msg.roundNumber}/${msg.totalRounds}`;
+    document.getElementById('p-category').textContent = msg.category;
+    document.getElementById('p-svg').innerHTML        = msg.svg;
+    renderHiddenWord(msg.hiddenWord);
+    updateTimer(msg.timeLeft, msg.totalTime);
+    clearNotif();
+    enableInput();
+    showScreen('s-playing');
+  }
+
+  function handleTick(msg) {
+    updateTimer(msg.timeLeft, totalTime);
+    renderHiddenWord(msg.hiddenWord);
+  }
+
+  function handleCorrectAnswer(msg) {
+    if (msg.playerId === myPlayerId) {
+      myScore += msg.points;
+      document.getElementById('p-score').textContent = myScore + ' pts';
+      showNotif(`¡Correcto! +${msg.points} pts  [L=${msg.lamport}]`, 'success', 0);
+      disableInput();
+      solved = true;
+    } else {
+      showNotif(`${msg.nick} acertó · +${msg.points} pts  [L=${msg.lamport}]`, 'info', 3000);
+    }
+  }
+
+  function handleWrongAnswer() {
+    const inp = document.getElementById('p-input');
+    inp.classList.remove('shake');
+    void inp.offsetWidth; // reflow para reiniciar animación
+    inp.classList.add('shake');
+    setTimeout(() => inp.classList.remove('shake'), 400);
+    inp.value = '';
+    showNotif('Incorrecto, intenta de nuevo.', 'error', 2000);
+  }
+
+  function handleRoundEnd(msg) {
+    document.getElementById('re-word').textContent = msg.word;
+    const el = document.getElementById('re-solvers');
+    if (msg.solvers.length === 0) {
+      el.innerHTML = '<p class="no-solvers">Nadie acertó esta ronda.</p>';
+    } else {
+      // Eje 2: los solvers ya vienen ordenados por Lamport desde el servidor
+      el.innerHTML = msg.solvers.map((s, i) =>
+        `<div class="solver-row">
+          <span>#${i+1} ${s.nick}</span>
+          <span style="color:#10b981">+${s.points} pts</span>
+          <span style="color:#6b7280;font-size:0.75rem">L=${s.lamport}</span>
+        </div>`
+      ).join('');
+    }
+    showScreen('s-roundEnd');
+  }
+
+  function handleRanking(msg) {
+    if (msg.final) {
+      renderFinalRanking(msg.entries);
+      showScreen('s-gameEnd');
+      return;
+    }
+    renderMiniRanking(msg.entries);
+  }
+
+  // ── Guess ──────────────────────────────────────────────────────────────────
+  document.getElementById('p-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitGuess();
+  });
+
+  function submitGuess() {
+    if (solved) return;
+    const inp  = document.getElementById('p-input');
+    const word = inp.value.trim();
+    if (!word) return;
+    // Eje 2: incrementar reloj local antes de enviar (evento de envío)
+    send({ type: 'GUESS', word, lamport: lTick() });
+    inp.value = '';
+  }
+
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  function setCount(n) {
+    document.getElementById('w-count').textContent = n + ' jugador' + (n === 1 ? '' : 'es');
+  }
+
+  function renderHiddenWord(hw) {
+    // hw viene como "_ _ U _ _ _" con espacios entre chars
+    const chars = hw.split(' ');
+    document.getElementById('p-word').innerHTML = chars.map(c =>
+      c === '_'
+        ? `<span>_</span>`
+        : `<span class="revealed">${c}</span>`
+    ).join('<span style="letter-spacing:0"> </span>');
+  }
+
+  function updateTimer(t, total) {
+    document.getElementById('p-timer').textContent = t;
+    const pct = (t / total) * 100;
+    const bar = document.getElementById('p-bar');
+    bar.style.width = pct + '%';
+    bar.classList.toggle('urgent', t <= 6);
+  }
+
+  function showNotif(text, type, duration = 3000) {
+    clearTimeout(notifTimer);
+    const el = document.getElementById('p-notif');
+    el.textContent = text;
+    el.className = 'notif ' + type;
+    if (duration > 0) notifTimer = setTimeout(() => clearNotif(), duration);
+  }
+
+  function clearNotif() {
+    document.getElementById('p-notif').className = 'notif';
+  }
+
+  function enableInput() {
+    document.getElementById('p-input').disabled = false;
+    document.getElementById('p-btn').disabled   = false;
+    document.getElementById('p-input').focus();
+  }
+
+  function disableInput() {
+    document.getElementById('p-input').disabled = true;
+    document.getElementById('p-btn').disabled   = true;
+  }
+
+  function renderMiniRanking(entries) {
+    document.getElementById('p-ranking').innerHTML = entries.slice(0, 5).map((e, i) =>
+      `<div class="rank-row ${e.nick === myNick ? 'me' : ''}">
+        <span class="rank-pos">#${i+1}</span>
+        <span class="rank-nick">${e.nick}</span>
+        <span class="rank-score">${e.score}</span>
+      </div>`
+    ).join('');
+  }
+
+  function renderFinalRanking(entries) {
+    const medals = ['🥇', '🥈', '🥉'];
+    const topClass = ['top1', 'top2', 'top3'];
+    document.getElementById('ge-list').innerHTML = entries.map((e, i) =>
+      `<div class="final-row ${topClass[i] ?? ''}">
+        <span class="medal">${medals[i] ?? '#' + (i+1)}</span>
+        <span class="final-nick">${e.nick}</span>
+        <span class="final-score">${e.score} pts</span>
+      </div>`
+    ).join('');
+  }
+</script>
+</body>
+</html>

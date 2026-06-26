@@ -27,5 +27,13 @@ export class LamportClock {
     return this.t;
   }
 
+  /**
+   * Fusiona un valor recibido sin contar un evento (clock = max(clock, v)).
+   * Se usa al restaurar una réplica para no retroceder el reloj del nodo.
+   */
+  merge(v: number): void {
+    this.t = Math.max(this.t, v);
+  }
+
   get value(): number { return this.t; }
 }

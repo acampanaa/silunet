@@ -53,6 +53,11 @@ const httpServer = http.createServer((req, res) => {
       isCoordinator: cluster.isCoordinator,
       coordinator:   COORDINATOR_ID,
       connectedPeers: cluster.getConnectedPeers(),
+      // Réplica local (Eje 3): permite comparar seguidor vs coordinador
+      phase:         game.getPhase(),
+      round:         game.getCurrentRoundInfo(),
+      ranking:       game.getRanking(),
+      lamport:       game.clock.value,
     }));
     return;
   }
@@ -119,6 +124,13 @@ game.on('broadcast', (msg: S2C) => {
       payload: msg,
       lamport: game.clock.tick(),
     });
+    // Eje 3: replica el estado autoritativo completo para que cada seguidor
+    // mantenga una réplica pasiva (base del failover del Paso C / Bully).
+    cluster.broadcastToPeers({
+      type:     'N_REPLICATE',
+      snapshot: game.snapshot(),
+      lamport:  game.clock.tick(),
+    });
   }
 });
 
@@ -130,6 +142,11 @@ cluster.on('peer_message', (msg: N2N, fromPeerId: string) => {
     // Seguidor recibe broadcast del coordinador → entregar a clientes locales
     case 'N_BROADCAST':
       broadcastToLocalClients(msg.payload);
+      break;
+
+    // Seguidor recibe el estado autoritativo → actualizar su réplica pasiva (Eje 3)
+    case 'N_REPLICATE':
+      if (!cluster.isCoordinator) game.restore(msg.snapshot);
       break;
 
     // Coordinador → seguidor: enviar a un jugador específico en ese nodo

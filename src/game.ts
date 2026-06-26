@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C } from './types';
+import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot } from './types';
 import { getRandomRounds } from './wordBank';
 import { LamportClock } from './lamport';
 
@@ -43,6 +43,34 @@ export class Game extends EventEmitter {
       timeLeft:    this.round.timeLeft,
       totalTime:   this.round.totalTime,
     };
+  }
+
+  // --- Replicación (Eje 3: réplica por nodo) ---
+
+  /** Estado autoritativo completo, para enviar a los seguidores (N_REPLICATE). */
+  snapshot(): GameSnapshot {
+    return {
+      phase:             this.phase,
+      rounds:            this.rounds,
+      currentRoundIndex: this.currentRoundIndex,
+      round:             this.round ?? null,
+      players:           [...this.players.values()].map(p => ({ ...p })),
+      lamport:           this.clock.value,
+    };
+  }
+
+  /**
+   * Aplica un snapshot recibido del coordinador. Réplica PASIVA: solo absorbe
+   * estado, nunca arranca timers ni emite eventos. Si este nodo es promovido a
+   * coordinador (Bully, Paso C), reanudará la partida desde esta réplica.
+   */
+  restore(s: GameSnapshot): void {
+    this.phase             = s.phase;
+    this.rounds            = s.rounds;
+    this.currentRoundIndex = s.currentRoundIndex;
+    this.round             = s.round ?? undefined;
+    this.players           = new Map(s.players.map(p => [p.id, { ...p }]));
+    this.clock.merge(s.lamport);
   }
 
   // --- Gestión de jugadores ---

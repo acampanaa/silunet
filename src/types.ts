@@ -28,6 +28,18 @@ export interface RankEntry {
   score: number;
 }
 
+// Snapshot completo del estado autoritativo del juego.
+// Viaja por el canal inter-nodo (N_REPLICATE) para que cada seguidor mantenga
+// una réplica pasiva y pueda continuar la partida si es promovido a coordinador.
+export interface GameSnapshot {
+  phase: GamePhase;
+  rounds: WordEntry[];
+  currentRoundIndex: number;
+  round: RoundState | null;
+  players: Player[];
+  lamport: number;
+}
+
 // Mensajes servidor → cliente
 export type S2C =
   | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number }
@@ -44,6 +56,7 @@ export type S2C =
 // Mensajes nodo → nodo (inter-cluster)
 export type N2N =
   | { type: 'N_HELLO';         nodeId: string; lamport: number }
+  | { type: 'N_REPLICATE';     snapshot: GameSnapshot; lamport: number }
   | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }

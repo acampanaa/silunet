@@ -293,8 +293,9 @@
   }
 
   function handleCorrectAnswer(msg) {
-    // Eje 2: mostrar el timestamp Lamport del evento en la pantalla maestra
-    showNotif(`${msg.nick} acertó! +${msg.points} pts  [L=${msg.lamport}]`, 3500);
+    // Eje 2: mostrar posición lógica de llegada y timestamp Lamport (los puntos
+    // se calculan por posición al cerrar la ronda).
+    showNotif(`${msg.nick} acertó · #${msg.position}  [L=${msg.lamport}]`, 3500);
   }
 
   function handleRoundEnd(msg) {

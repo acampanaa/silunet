@@ -19,8 +19,9 @@ export interface RoundState {
   revealedCount: number;
   timeLeft: number;
   totalTime: number;
-  // lamport: timestamp Lamport del acierto — usado para ordenar cuando varios aciertan "al mismo tiempo"
-  solvers: Array<{ id: string; points: number; lamport: number }>;
+  // lamport: timestamp Lamport del acierto — define la POSICIÓN LÓGICA de llegada.
+  // Los puntos NO se guardan aquí: se calculan al cerrar la ronda según esa posición y N.
+  solvers: Array<{ id: string; lamport: number }>;
 }
 
 export interface RankEntry {
@@ -47,10 +48,10 @@ export type S2C =
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
-  | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; points: number; lamport: number }
+  | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number }
   | { type: 'WRONG_ANSWER' }
   | { type: 'ALREADY_SOLVED' }
-  | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; lamport: number }> }
+  | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; position: number; lamport: number }> }
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
   // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling)
   | { type: 'CLUSTER_STATE'; nodes: Array<{ id: string; up: boolean; isCoordinator: boolean }> }

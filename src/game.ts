@@ -7,8 +7,13 @@ import { Mutex } from './mutex';
 const TOTAL_TIME   = 24;  // segundos por ronda
 const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
 const GAP_BETWEEN  = 4;   // segundos entre rondas
-const POINTS_BASE  = 100;
-const POINTS_MIN   = 10;  // puntos mínimos por respuesta correcta
+
+// Eje 2+3: el puntaje depende de la POSICIÓN LÓGICA de llegada (orden de Lamport
+// resuelto por el coordinador), NO del tiempo ni de la latencia de red del celular.
+//   puntos = POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (posición - 1) / N)
+// con N = total de aciertos de la ronda. Primero (pos=1) → POINTS_TOP.
+const POINTS_TOP  = 1000; // puntos del primero en orden lógico
+const POINTS_BASE = 100;  // base garantizada (el último en orden lógico tiende a esto)
 
 export class Game extends EventEmitter {
   private players         = new Map<string, Player>();
@@ -215,16 +220,17 @@ export class Game extends EventEmitter {
       const eventLamport = this.clock.update(clientLamport);
 
       if (word.trim().toUpperCase() === this.round.wordEntry.word) {
-        const points = Math.max(
-          POINTS_MIN,
-          Math.round(POINTS_BASE * (this.round.timeLeft / this.round.totalTime))
-        );
         const player = this.players.get(id)!;
-        player.score += points;
-        this.round.solvers.push({ id, points, lamport: eventLamport });
+        // Solo se registra la llegada con su timestamp Lamport. Los puntos NO se
+        // asignan aquí: dependen de N (total de aciertos), que se conoce al cerrar
+        // la ronda. Así el puntaje queda atado a la posición lógica, no al tiempo.
+        this.round.solvers.push({ id, lamport: eventLamport });
+
+        // Posición provisional de llegada (orden lógico hasta este instante).
+        const position = this.round.solvers.length;
 
         // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
-        this.broadcast({ type: 'CORRECT_ANSWER', nick: player.nick, playerId: player.id, points, lamport: eventLamport });
+        this.broadcast({ type: 'CORRECT_ANSWER', nick: player.nick, playerId: player.id, position, lamport: eventLamport });
         return 'correct';
       }
       return 'wrong';
@@ -238,14 +244,24 @@ export class Game extends EventEmitter {
     clearInterval(this.timer);
     this.phase = 'roundEnd';
 
-    // Eje 2: ordenar aciertos por timestamp Lamport (menor = acertó primero en orden lógico)
-    const solvers = [...this.round.solvers]
-      .sort((a, b) => a.lamport - b.lamport)
-      .map(s => ({
-        nick:    this.players.get(s.id)?.nick ?? '?',
-        points:  s.points,
-        lamport: s.lamport,
-      }));
+    // Eje 2: ordenar aciertos por timestamp Lamport (menor = llegó primero en orden lógico).
+    // Eje 3: el puntaje se asigna AQUÍ, en serie y con N ya conocido, según la posición
+    // lógica de cada uno — por eso no depende de la latencia de red de cada celular.
+    const ordered = [...this.round.solvers].sort((a, b) => a.lamport - b.lamport);
+    const N = ordered.length;
+
+    const solvers = ordered.map((s, i) => {
+      const position = i + 1;
+      const points = Math.round(POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (position - 1) / N));
+      const player = this.players.get(s.id);
+      if (player) player.score += points;
+      return {
+        nick:     player?.nick ?? '?',
+        points,
+        position,
+        lamport:  s.lamport,
+      };
+    });
 
     this.clock.tick(); // evento interno: fin de ronda
     this.broadcast({ type: 'ROUND_END', word: this.round.wordEntry.word, solvers });

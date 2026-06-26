@@ -284,14 +284,15 @@
   }
 
   function handleCorrectAnswer(msg) {
+    // El puntaje depende de la posición lógica y de N (total de aciertos), que solo
+    // se conoce al cerrar la ronda. Aquí mostramos la posición de llegada; los puntos
+    // llegan en el RANKING al final de la ronda.
     if (msg.playerId === myPlayerId) {
-      myScore += msg.points;
-      document.getElementById('p-score').textContent = myScore + ' pts';
-      showNotif(`¡Correcto! +${msg.points} pts  [L=${msg.lamport}]`, 'success', 0);
+      showNotif(`¡Correcto! Llegaste #${msg.position} · puntos al cierre  [L=${msg.lamport}]`, 'success', 0);
       disableInput();
       solved = true;
     } else {
-      showNotif(`${msg.nick} acertó · +${msg.points} pts  [L=${msg.lamport}]`, 'info', 3000);
+      showNotif(`${msg.nick} acertó · #${msg.position}  [L=${msg.lamport}]`, 'info', 3000);
     }
   }
 
@@ -324,6 +325,12 @@
   }
 
   function handleRanking(msg) {
+    // El puntaje propio es autoritativo del servidor (se calcula al cerrar la ronda).
+    const mine = msg.entries.find(e => e.nick === myNick);
+    if (mine) {
+      myScore = mine.score;
+      document.getElementById('p-score').textContent = myScore + ' pts';
+    }
     if (msg.final) {
       renderFinalRanking(msg.entries);
       showScreen('s-gameEnd');

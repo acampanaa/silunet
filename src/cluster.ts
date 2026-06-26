@@ -11,6 +11,10 @@ import { EventEmitter } from 'events';
 import { N2N } from './types';
 import { LamportClock } from './lamport';
 
+// Eje 4: heartbeats entre nodos. El documento pide detectar la caída en ~2s.
+const HEARTBEAT_INTERVAL_MS = 1000; // latido a cada peer
+const HEARTBEAT_TIMEOUT_MS  = 2500; // sin latido por más de esto → peer caído
+
 export class Cluster extends EventEmitter {
   readonly nodeId: string;
   coordinatorId:   string;   // puede cambiar con Bully (Eje 4)
@@ -19,6 +23,11 @@ export class Cluster extends EventEmitter {
   // peerId → WebSocket (tanto conexiones salientes como entrantes)
   private peers = new Map<string, WebSocket>();
   private peerUrls: string[];
+
+  // Eje 4: último latido recibido por peer, y timers de heartbeat
+  private lastSeen = new Map<string, number>();
+  private hbTimer?:   ReturnType<typeof setInterval>;
+  private hbMonitor?: ReturnType<typeof setInterval>;
 
   constructor(nodeId: string, coordinatorId: string, clock: LamportClock, peerUrls: string[]) {
     super();
@@ -46,6 +55,7 @@ export class Cluster extends EventEmitter {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
         this.peers.set(peerId, ws);
+        this.lastSeen.set(peerId, Date.now());
         this.clock.update(msg.lamport);
         // Responder con nuestro propio HELLO
         this.rawSend(ws, { type: 'N_HELLO', nodeId: this.nodeId, lamport: this.clock.tick() });
@@ -54,8 +64,7 @@ export class Cluster extends EventEmitter {
         return;
       }
 
-      this.clock.update(msg.lamport);
-      this.emit('peer_message', msg, peerId);
+      this.onFrame(ws, peerId, msg);
     });
 
     ws.on('close', () => {
@@ -76,6 +85,42 @@ export class Cluster extends EventEmitter {
     for (const url of this.peerUrls) {
       this.connectToPeer(url);
     }
+    this.startHeartbeats();
+  }
+
+  // ── Heartbeats (Eje 4) ─────────────────────────────────────────────────────
+
+  /** Procesa un frame de un peer ya identificado; intercepta los latidos. */
+  private onFrame(ws: WebSocket, peerId: string, msg: N2N) {
+    this.lastSeen.set(peerId, Date.now());
+    if (msg.type === 'N_HEARTBEAT') { this.clock.merge(msg.lamport); return; }
+    this.clock.update(msg.lamport);
+    this.emit('peer_message', msg, peerId);
+  }
+
+  /** Envía un latido a cada peer y vigila la ausencia de latidos. */
+  private startHeartbeats() {
+    if (this.hbTimer) return;
+    this.hbTimer = setInterval(() => {
+      this.broadcastToPeers({ type: 'N_HEARTBEAT', nodeId: this.nodeId, lamport: this.clock.value });
+    }, HEARTBEAT_INTERVAL_MS);
+    this.hbMonitor = setInterval(() => this.checkTimeouts(), HEARTBEAT_INTERVAL_MS);
+  }
+
+  /** Marca como caído a todo peer del que no llega latido dentro del umbral. */
+  private checkTimeouts() {
+    const now = Date.now();
+    for (const [peerId, ws] of [...this.peers]) {
+      const last = this.lastSeen.get(peerId) ?? now;
+      if (now - last > HEARTBEAT_TIMEOUT_MS) {
+        console.warn(`[${this.nodeId}] heartbeat perdido de ${peerId} (${now - last}ms) -> caido`);
+        this.peers.delete(peerId);
+        this.lastSeen.delete(peerId);
+        try { ws.terminate(); } catch { /* ya cerrado */ }
+        this.emit('peer_timeout', peerId);      // señal para Bully (Paso C)
+        this.emit('peer_disconnected', peerId);
+      }
+    }
   }
 
   private connectToPeer(url: string) {
@@ -95,14 +140,14 @@ export class Cluster extends EventEmitter {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
         this.peers.set(peerId, ws);
+        this.lastSeen.set(peerId, Date.now());
         this.clock.update(msg.lamport);
         console.log(`[${this.nodeId}] Conectado a peer (saliente): ${peerId}`);
         this.emit('peer_connected', peerId);
         return;
       }
 
-      this.clock.update(msg.lamport);
-      this.emit('peer_message', msg, peerId);
+      this.onFrame(ws, peerId, msg);
     });
 
     ws.on('close', () => {

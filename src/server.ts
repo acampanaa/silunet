@@ -210,6 +210,7 @@ cluster.on('peer_message', (msg: N2N, fromPeerId: string) => {
 
 cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] ✓ Peer listo: ${id}`));
 cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] ✗ Peer caído: ${id}`));
+cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] ⚠ Heartbeat perdido de ${id} (Eje 4)`));
 
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 

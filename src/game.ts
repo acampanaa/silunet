@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot } from './types';
 import { getRandomRounds } from './wordBank';
 import { LamportClock } from './lamport';
+import { Mutex } from './mutex';
 
 const TOTAL_TIME   = 24;  // segundos por ronda
 const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
@@ -19,6 +20,9 @@ export class Game extends EventEmitter {
 
   // Eje 2: reloj de Lamport del nodo
   readonly clock = new LamportClock();
+
+  // Eje 3: candado lógico que serializa el acceso al marcador compartido
+  private readonly scoreboardLock = new Mutex('marcador');
 
   // --- Consultas de estado ---
 
@@ -194,28 +198,34 @@ export class Game extends EventEmitter {
 
   // Eje 2: clientLamport es el reloj del cliente al momento de enviar el GUESS.
   // update() sincroniza el reloj del nodo: t = max(local, clientLamport) + 1.
-  // Ese valor es el timestamp oficial del evento "acierto" en este nodo.
-  handleGuess(id: string, word: string, clientLamport: number): 'correct' | 'wrong' | 'already_solved' | 'not_playing' {
+  // Eje 3: toda la sección que lee/modifica el marcador corre bajo el candado,
+  // así dos aciertos concurrentes se procesan en serie (no se entrelazan).
+  async handleGuess(id: string, word: string, clientLamport: number): Promise<'correct' | 'wrong' | 'already_solved' | 'not_playing'> {
     if (!this.round || this.phase !== 'playing') return 'not_playing';
-    if (this.round.solvers.find(s => s.id === id)) return 'already_solved';
 
-    // Sincronizar reloj antes de procesar el evento
-    const eventLamport = this.clock.update(clientLamport);
+    return this.scoreboardLock.runExclusive(id, () => {
+      // ── Sección crítica: acceso exclusivo al marcador ──
+      if (!this.round || this.phase !== 'playing') return 'not_playing';
+      if (this.round.solvers.find(s => s.id === id)) return 'already_solved';
 
-    if (word.trim().toUpperCase() === this.round.wordEntry.word) {
-      const points = Math.max(
-        POINTS_MIN,
-        Math.round(POINTS_BASE * (this.round.timeLeft / this.round.totalTime))
-      );
-      const player = this.players.get(id)!;
-      player.score += points;
-      this.round.solvers.push({ id, points, lamport: eventLamport });
+      // Timestamp oficial del evento "acierto" en este nodo (Eje 2)
+      const eventLamport = this.clock.update(clientLamport);
 
-      // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para que todos vean el orden lógico
-      this.broadcast({ type: 'CORRECT_ANSWER', nick: player.nick, playerId: player.id, points, lamport: eventLamport });
-      return 'correct';
-    }
-    return 'wrong';
+      if (word.trim().toUpperCase() === this.round.wordEntry.word) {
+        const points = Math.max(
+          POINTS_MIN,
+          Math.round(POINTS_BASE * (this.round.timeLeft / this.round.totalTime))
+        );
+        const player = this.players.get(id)!;
+        player.score += points;
+        this.round.solvers.push({ id, points, lamport: eventLamport });
+
+        // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
+        this.broadcast({ type: 'CORRECT_ANSWER', nick: player.nick, playerId: player.id, points, lamport: eventLamport });
+        return 'correct';
+      }
+      return 'wrong';
+    });
   }
 
   // --- Fin de ronda / partida ---

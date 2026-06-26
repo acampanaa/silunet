@@ -113,6 +113,15 @@ function sendToLocalPlayer(playerId: string, msg: S2C): boolean {
   return false;
 }
 
+// Eje 4: empuja la salud del clúster a las pantallas maestras locales (sin polling).
+function sendClusterState() {
+  const msg: S2C = { type: 'CLUSTER_STATE', nodes: cluster.clusterState().nodes };
+  const data = JSON.stringify(msg);
+  for (const [ws, meta] of clients) {
+    if (meta.role === 'master' && ws.readyState === WebSocket.OPEN) ws.send(data);
+  }
+}
+
 // ── Difusión del juego → clientes locales + peers (Eje 1 inter-nodo) ─────────
 
 game.on('broadcast', (msg: S2C) => {
@@ -136,7 +145,7 @@ game.on('broadcast', (msg: S2C) => {
 
 // ── Mensajes entre nodos ──────────────────────────────────────────────────────
 
-cluster.on('peer_message', (msg: N2N, fromPeerId: string) => {
+cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
   switch (msg.type) {
 
     // Seguidor recibe broadcast del coordinador → entregar a clientes locales
@@ -181,7 +190,7 @@ cluster.on('peer_message', (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía GUESS al coordinador (Eje 2: Lamport del cliente incluido)
     case 'N_FORWARD_GUESS': {
       if (!cluster.isCoordinator) return;
-      const result = game.handleGuess(msg.playerId, msg.word, msg.lamport);
+      const result = await game.handleGuess(msg.playerId, msg.word, msg.lamport);
       // Solo respuestas negativas van de vuelta al jugador; las positivas se broadcast
       if (result === 'wrong' || result === 'already_solved') {
         cluster.sendToPeer(msg.originNode, {
@@ -219,6 +228,11 @@ cluster.on('became_coordinator', () => {
 });
 cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
 
+// Eje 4: cualquier cambio de topología o de coordinador se empuja al master.
+cluster.on('peer_connected',     () => sendClusterState());
+cluster.on('peer_disconnected',  () => sendClusterState());
+cluster.on('coordinator_changed', () => sendClusterState());
+
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 
 const wss = new WebSocketServer({ server: httpServer });
@@ -232,7 +246,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
   clients.set(ws, { role: 'unknown' });
 
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let msg: C2S;
     try { msg = JSON.parse(raw.toString()) as C2S; }
     catch { return; }
@@ -270,6 +284,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
       case 'MASTER_JOIN': {
         client.role = 'master';
+        sendClusterState(); // Eje 4: salud del clúster al instante
         if (cluster.isCoordinator) {
           send(ws, { type: 'PLAYER_COUNT', count: game.getPlayerCount() });
           if (game.getPhase() !== 'waiting') {
@@ -283,7 +298,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       case 'GUESS': {
         if (!client.playerId) return;
         if (cluster.isCoordinator) {
-          const result = game.handleGuess(client.playerId, msg.word ?? '', msg.lamport ?? 0);
+          const result = await game.handleGuess(client.playerId, msg.word ?? '', msg.lamport ?? 0);
           if (result === 'already_solved') send(ws, { type: 'ALREADY_SOLVED' });
           else if (result === 'wrong')     send(ws, { type: 'WRONG_ANSWER' });
         } else {

@@ -33,6 +33,9 @@ export class Cluster extends EventEmitter {
   private hbTimer?:   ReturnType<typeof setInterval>;
   private hbMonitor?: ReturnType<typeof setInterval>;
 
+  // Eje 4: nodos vistos al menos una vez (para el panel de salud)
+  private knownNodes = new Set<string>();
+
   // Eje 4: estado de la elección Bully
   private electionInProgress = false;
   private gotAlive = false;
@@ -45,6 +48,7 @@ export class Cluster extends EventEmitter {
     this.coordinatorId = coordinatorId;
     this.clock         = clock;
     this.peerUrls      = peerUrls;
+    this.knownNodes.add(nodeId);
 
     // Eje 4: si el peer que cae es el coordinador y yo no lo soy, abro elección Bully.
     this.on('peer_disconnected', (peerId: string) => {
@@ -58,6 +62,17 @@ export class Cluster extends EventEmitter {
   get isCoordinator() { return this.nodeId === this.coordinatorId; }
 
   getConnectedPeers() { return [...this.peers.keys()]; }
+
+  /** Vista de salud del clúster desde este nodo (para la pantalla maestra). */
+  clusterState() {
+    const up = new Set([this.nodeId, ...this.peers.keys()]);
+    const nodes = [...this.knownNodes].sort().map(id => ({
+      id,
+      up: up.has(id),
+      isCoordinator: id === this.coordinatorId,
+    }));
+    return { nodes };
+  }
 
   // ── Conexiones entrantes (llamado por server.ts cuando detecta x-quorum-peer) ──
 
@@ -74,6 +89,7 @@ export class Cluster extends EventEmitter {
         peerId = msg.nodeId;
         this.peers.set(peerId, ws);
         this.lastSeen.set(peerId, Date.now());
+        this.knownNodes.add(peerId);
         this.clock.update(msg.lamport);
         // Responder con nuestro propio HELLO
         this.rawSend(ws, { type: 'N_HELLO', nodeId: this.nodeId, lamport: this.clock.tick() });
@@ -252,6 +268,7 @@ export class Cluster extends EventEmitter {
         peerId = msg.nodeId;
         this.peers.set(peerId, ws);
         this.lastSeen.set(peerId, Date.now());
+        this.knownNodes.add(peerId);
         this.clock.update(msg.lamport);
         console.log(`[${this.nodeId}] Conectado a peer (saliente): ${peerId}`);
         this.emit('peer_connected', peerId);

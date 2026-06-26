@@ -51,6 +51,8 @@ export type S2C =
   | { type: 'ALREADY_SOLVED' }
   | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; lamport: number }> }
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
+  // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling)
+  | { type: 'CLUSTER_STATE'; nodes: Array<{ id: string; up: boolean; isCoordinator: boolean }> }
   | { type: 'ERROR'; message: string };
 
 // Mensajes nodo → nodo (inter-cluster)

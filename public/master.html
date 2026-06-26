@@ -213,12 +213,11 @@
 <script>
   let totalTime   = 24;
 
-  // Cargar info del nodo y actualizar panel de salud del clúster
-  function loadNodeInfo() {
+  // QR/URL de unión: una sola lectura al cargar (no es polling de estado de juego).
+  function loadJoinInfo() {
     fetch('/api/info')
       .then(r => r.json())
       .then(info => {
-        // QR y URL
         document.getElementById('qr-url-text').textContent = info.joinUrl;
         if (!document.getElementById('qr-canvas').hasChildNodes()) {
           new QRCode(document.getElementById('qr-canvas'), {
@@ -227,23 +226,21 @@
             correctLevel: QRCode.CorrectLevel.M,
           });
         }
-        // Panel de nodos (Eje 4 — por ahora muestra peers conectados)
-        const known = ['node1','node2','node3'];
-        const connected = new Set([info.nodeId, ...info.connectedPeers]);
-        document.getElementById('node-status').innerHTML = known.map(n => {
-          const ok = connected.has(n);
-          const isCoord = n === info.coordinator;
-          const label = isCoord ? `${n} ★` : n;
-          return `<div class="node-dot"><span class="dot ${ok ? 'ok' : 'down'}"></span>${label}</div>`;
-        }).join('');
       })
       .catch(() => {
         document.getElementById('qr-url-text').textContent = 'Sin conexión al servidor';
       });
   }
+  loadJoinInfo();
 
-  loadNodeInfo();
-  setInterval(loadNodeInfo, 3000); // refrescar panel de nodos cada 3s
+  // Eje 4: el panel de salud del clúster se actualiza por WebSocket (push), no por polling.
+  function renderNodes(nodes) {
+    document.getElementById('node-status').innerHTML = nodes.map(n => {
+      const label = n.isCoordinator ? `${n.id} ★` : n.id;
+      return `<div class="node-dot"><span class="dot ${n.up ? 'ok' : 'down'}"></span>${label}</div>`;
+    }).join('');
+  }
+
   let notifTimer  = null;
   let currentPhase = 'waiting';
 
@@ -262,6 +259,7 @@
       case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
       case 'ROUND_END':      handleRoundEnd(msg);      break;
       case 'RANKING':        handleRanking(msg);       break;
+      case 'CLUSTER_STATE':  renderNodes(msg.nodes);   break;
     }
   };
 

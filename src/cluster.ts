@@ -15,6 +15,10 @@ import { LamportClock } from './lamport';
 const HEARTBEAT_INTERVAL_MS = 1000; // latido a cada peer
 const HEARTBEAT_TIMEOUT_MS  = 2500; // sin latido por más de esto → peer caído
 
+// Eje 4 — Algoritmo del Matón (Bully)
+const ELECTION_TIMEOUT_MS = 1500;   // espera de respuestas N_ALIVE antes de proclamarse
+const COORD_WAIT_MS       = 3000;   // espera del anuncio de coordinador antes de reintentar
+
 export class Cluster extends EventEmitter {
   readonly nodeId: string;
   coordinatorId:   string;   // puede cambiar con Bully (Eje 4)
@@ -29,12 +33,26 @@ export class Cluster extends EventEmitter {
   private hbTimer?:   ReturnType<typeof setInterval>;
   private hbMonitor?: ReturnType<typeof setInterval>;
 
+  // Eje 4: estado de la elección Bully
+  private electionInProgress = false;
+  private gotAlive = false;
+  private electionTimer?: ReturnType<typeof setTimeout>;
+  private coordWaitTimer?: ReturnType<typeof setTimeout>;
+
   constructor(nodeId: string, coordinatorId: string, clock: LamportClock, peerUrls: string[]) {
     super();
     this.nodeId        = nodeId;
     this.coordinatorId = coordinatorId;
     this.clock         = clock;
     this.peerUrls      = peerUrls;
+
+    // Eje 4: si el peer que cae es el coordinador y yo no lo soy, abro elección Bully.
+    this.on('peer_disconnected', (peerId: string) => {
+      if (peerId === this.coordinatorId && !this.isCoordinator) {
+        console.log(`[${this.nodeId}] Coordinador ${peerId} caído -> iniciar elección Bully`);
+        this.startElection();
+      }
+    });
   }
 
   get isCoordinator() { return this.nodeId === this.coordinatorId; }
@@ -95,7 +113,100 @@ export class Cluster extends EventEmitter {
     this.lastSeen.set(peerId, Date.now());
     if (msg.type === 'N_HEARTBEAT') { this.clock.merge(msg.lamport); return; }
     this.clock.update(msg.lamport);
+    if (msg.type === 'N_ELECTION' || msg.type === 'N_ALIVE' || msg.type === 'N_COORDINATOR') {
+      this.handleElection(msg);
+      return;
+    }
     this.emit('peer_message', msg, peerId);
+  }
+
+  // ── Elección de líder — Algoritmo del Matón / Bully (Eje 4) ─────────────────
+
+  /** ¿Es el nodo `a` de mayor jerarquía que `b`? (mayor número de nodo gana). */
+  private higher(a: string, b: string): boolean {
+    const na = parseInt(a.replace(/\D/g, ''), 10);
+    const nb = parseInt(b.replace(/\D/g, ''), 10);
+    if (!isNaN(na) && !isNaN(nb) && na !== nb) return na > nb;
+    return a > b;
+  }
+
+  private handleElection(msg: { type: string; nodeId: string }) {
+    switch (msg.type) {
+      case 'N_ELECTION':
+        // Un nodo menor me reta: respondo que sigo vivo y arranco mi propia elección.
+        this.sendToPeer(msg.nodeId, { type: 'N_ALIVE', nodeId: this.nodeId, lamport: this.clock.tick() });
+        this.startElection();
+        break;
+      case 'N_ALIVE':
+        // Hay alguien mayor vivo: no seré coordinador; espero su anuncio.
+        this.gotAlive = true;
+        if (this.electionTimer) clearTimeout(this.electionTimer);
+        this.waitForCoordinator();
+        break;
+      case 'N_COORDINATOR':
+        this.setCoordinator(msg.nodeId);
+        break;
+    }
+  }
+
+  /** Inicia una elección: reta a los nodos de mayor jerarquía conectados. */
+  startElection() {
+    if (this.isCoordinator) { this.announceVictory(); return; }
+    if (this.electionInProgress) return;
+    this.electionInProgress = true;
+    this.gotAlive = false;
+
+    const higher = [...this.peers.keys()].filter(id => this.higher(id, this.nodeId));
+    console.log(`[${this.nodeId}] Elección Bully: nodos mayores conectados = [${higher.join(', ')}]`);
+
+    if (higher.length === 0) { this.becomeCoordinator(); return; }
+
+    for (const id of higher) {
+      this.sendToPeer(id, { type: 'N_ELECTION', nodeId: this.nodeId, lamport: this.clock.tick() });
+    }
+    if (this.electionTimer) clearTimeout(this.electionTimer);
+    this.electionTimer = setTimeout(() => {
+      if (!this.gotAlive) this.becomeCoordinator(); // nadie mayor respondió → gano
+    }, ELECTION_TIMEOUT_MS);
+  }
+
+  private waitForCoordinator() {
+    if (this.coordWaitTimer) clearTimeout(this.coordWaitTimer);
+    this.coordWaitTimer = setTimeout(() => {
+      // El nodo mayor no anunció victoria (quizá también cayó) → reintento.
+      this.electionInProgress = false;
+      this.startElection();
+    }, COORD_WAIT_MS);
+  }
+
+  private becomeCoordinator() {
+    if (this.isCoordinator) return;
+    console.log(`[${this.nodeId}] ★ Me proclamo COORDINADOR (Bully)`);
+    this.coordinatorId = this.nodeId;
+    this.clearElectionTimers();
+    this.electionInProgress = false;
+    this.announceVictory();
+    this.emit('became_coordinator');
+    this.emit('coordinator_changed', this.nodeId);
+  }
+
+  private announceVictory() {
+    this.broadcastToPeers({ type: 'N_COORDINATOR', nodeId: this.nodeId, lamport: this.clock.tick() });
+  }
+
+  private setCoordinator(id: string) {
+    this.clearElectionTimers();
+    this.electionInProgress = false;
+    if (this.coordinatorId !== id) {
+      this.coordinatorId = id;
+      console.log(`[${this.nodeId}] Nuevo coordinador reconocido: ${id}`);
+      this.emit('coordinator_changed', id);
+    }
+  }
+
+  private clearElectionTimers() {
+    if (this.electionTimer)  { clearTimeout(this.electionTimer);  this.electionTimer = undefined; }
+    if (this.coordWaitTimer) { clearTimeout(this.coordWaitTimer); this.coordWaitTimer = undefined; }
   }
 
   /** Envía un latido a cada peer y vigila la ausencia de latidos. */

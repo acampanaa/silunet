@@ -58,6 +58,10 @@ export type N2N =
   | { type: 'N_HELLO';         nodeId: string; lamport: number }
   | { type: 'N_HEARTBEAT';     nodeId: string; lamport: number }
   | { type: 'N_REPLICATE';     snapshot: GameSnapshot; lamport: number }
+  // Eje 4 — Algoritmo del Matón (Bully)
+  | { type: 'N_ELECTION';      nodeId: string; lamport: number }
+  | { type: 'N_ALIVE';         nodeId: string; lamport: number }
+  | { type: 'N_COORDINATOR';   nodeId: string; lamport: number }
   | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }

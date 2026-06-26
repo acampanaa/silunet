@@ -73,6 +73,30 @@ export class Game extends EventEmitter {
     this.clock.merge(s.lamport);
   }
 
+  /**
+   * Eje 4: este nodo acaba de ser promovido a coordinador (Bully). Reanuda la
+   * partida desde la réplica: re-sincroniza a los clientes y vuelve a arrancar
+   * los timers que solo corren en el coordinador.
+   */
+  resume(): void {
+    if (this.timer) clearInterval(this.timer);
+    if (this.phase === 'playing' && this.round) {
+      this.broadcast({
+        type:        'ROUND_START',
+        roundNumber: this.currentRoundIndex + 1,
+        totalRounds: this.rounds.length,
+        category:    this.round.wordEntry.category,
+        svg:         this.round.wordEntry.svg,
+        hiddenWord:  this.round.hiddenWord.join(' '),
+        timeLeft:    this.round.timeLeft,
+        totalTime:   this.round.totalTime,
+      });
+      this.timer = setInterval(() => this.tick(), 1000);
+    } else if (this.phase === 'roundEnd') {
+      setTimeout(() => this.nextRound(), GAP_BETWEEN * 1000);
+    }
+  }
+
   // --- Gestión de jugadores ---
 
   addPlayer(id: string, nick: string): Player {

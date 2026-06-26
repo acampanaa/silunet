@@ -51,7 +51,7 @@ const httpServer = http.createServer((req, res) => {
       joinUrl:       `http://${getLocalIP()}:${PORT}/join`,
       nodeId:        NODE_ID,
       isCoordinator: cluster.isCoordinator,
-      coordinator:   COORDINATOR_ID,
+      coordinator:   cluster.coordinatorId,
       connectedPeers: cluster.getConnectedPeers(),
       // Réplica local (Eje 3): permite comparar seguidor vs coordinador
       phase:         game.getPhase(),
@@ -211,6 +211,13 @@ cluster.on('peer_message', (msg: N2N, fromPeerId: string) => {
 cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] ✓ Peer listo: ${id}`));
 cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] ✗ Peer caído: ${id}`));
 cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] ⚠ Heartbeat perdido de ${id} (Eje 4)`));
+
+// Eje 4: este nodo ganó la elección Bully → asume el control de la partida.
+cluster.on('became_coordinator', () => {
+  console.log(`[${NODE_ID}] ★ Asumo coordinación: reanudo la partida desde la réplica`);
+  game.resume();
+});
+cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
 
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 

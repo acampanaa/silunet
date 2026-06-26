@@ -225,6 +225,8 @@
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'JOIN', nick }));
+    // Eje 4: heartbeat del celular al servidor cada 1000 ms
+    setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
   };
 
   ws.onclose = () => showNotif('Conexión perdida. Recarga la página.', 'error', 0);
@@ -243,6 +245,7 @@
       case 'ALREADY_SOLVED':  /* ignorar */             break;
       case 'ROUND_END':       handleRoundEnd(msg);      break;
       case 'RANKING':         handleRanking(msg);       break;
+      case 'PLAYER_LEFT':     showNotif(`🔌 ${msg.nick} se desconectó`, 'info', 2500); break;
       case 'ERROR':           showNotif(msg.message, 'error'); break;
     }
   };

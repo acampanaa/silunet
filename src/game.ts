@@ -111,7 +111,10 @@ export class Game extends EventEmitter {
   }
 
   removePlayer(id: string) {
+    const player = this.players.get(id);
     this.players.delete(id);
+    // Eje 4: avisar al stand para mostrar "Jugador X: Desconectado"
+    if (player) this.broadcast({ type: 'PLAYER_LEFT', nick: player.nick });
     this.broadcast({ type: 'PLAYER_COUNT', count: this.players.size });
   }
 

@@ -44,6 +44,7 @@ export interface GameSnapshot {
 export type S2C =
   | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number }
   | { type: 'PLAYER_COUNT'; count: number }
+  | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
   | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; points: number; lamport: number }
@@ -76,4 +77,5 @@ export type C2S =
   | { type: 'JOIN'; nick: string }
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }
-  | { type: 'START_GAME'; totalRounds?: number };
+  | { type: 'START_GAME'; totalRounds?: number }
+  | { type: 'PING'; l?: number };  // Eje 4: latido del celular al servidor

@@ -88,6 +88,7 @@ const httpServer = http.createServer((req, res) => {
 interface ClientMeta {
   playerId?: string;
   role: 'player' | 'master' | 'unknown';
+  lastSeen?: number; // Eje 4: último heartbeat recibido de este cliente
 }
 
 const clients = new Map<WebSocket, ClientMeta>();
@@ -244,7 +245,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     return;
   }
 
-  clients.set(ws, { role: 'unknown' });
+  clients.set(ws, { role: 'unknown', lastSeen: Date.now() });
 
   ws.on('message', async (raw) => {
     let msg: C2S;
@@ -252,6 +253,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     catch { return; }
 
     const client = clients.get(ws)!;
+    client.lastSeen = Date.now(); // Eje 4: cualquier mensaje (incl. PING) cuenta como latido
 
     switch (msg.type) {
 
@@ -347,6 +349,20 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 });
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
+
+// Eje 4 (clientes): cada celular late cada 1s; si un cliente-jugador deja de
+// latir por más de 2s (pantalla apagada / Wi-Fi caído sin cerrar el socket),
+// se le da de baja del pool, igual que un cierre de conexión.
+const CLIENT_TIMEOUT_MS = 2000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [ws, meta] of clients) {
+    if (meta.role === 'player' && meta.lastSeen && now - meta.lastSeen > CLIENT_TIMEOUT_MS) {
+      console.log(`[${NODE_ID}] ⚠ Cliente ${meta.playerId} sin latido (${now - meta.lastSeen}ms) -> baja`);
+      ws.terminate(); // dispara 'close' -> removePlayer / N_PLAYER_LEFT + PLAYER_LEFT
+    }
+  }
+}, 500);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   const ip   = getLocalIP();

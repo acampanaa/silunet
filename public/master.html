@@ -260,6 +260,7 @@
       case 'ROUND_END':      handleRoundEnd(msg);      break;
       case 'RANKING':        handleRanking(msg);       break;
       case 'CLUSTER_STATE':  renderNodes(msg.nodes);   break;
+      case 'PLAYER_LEFT':    showNotif(`🔌 ${msg.nick}: Desconectado`, 4000); break;
     }
   };
 

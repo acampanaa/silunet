@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Quórum — Juego</title>
+  <title>Silunet — Juego</title>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -156,7 +156,7 @@
 
 <!-- Pantalla: esperando -->
 <div id="s-waiting" class="screen">
-  <div class="logo">QUÓRUM</div>
+  <div class="logo">SILUNET</div>
   <p class="wait-msg">Esperando que empiece la partida...</p>
   <div class="player-count" id="w-count">0 jugadores</div>
 </div>
@@ -205,7 +205,7 @@
 </div>
 
 <script>
-  const nick = sessionStorage.getItem('quorum_nick');
+  const nick = sessionStorage.getItem('silunet_nick');
   if (!nick) { window.location.href = '/join'; }
 
   let myPlayerId  = null;

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Quórum — Únete</title>
+  <title>Silunet — Únete</title>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -89,7 +89,7 @@
 </head>
 <body>
   <div class="card">
-    <h1>QUÓRUM</h1>
+    <h1>SILUNET</h1>
     <p class="subtitle">Adivina la silueta tecnológica</p>
     <label for="nick">Tu apodo</label>
     <input id="nick" type="text" placeholder="ej. TechMaster99"
@@ -109,7 +109,7 @@
         document.getElementById('err').textContent = 'Escribe tu apodo antes de continuar.';
         return;
       }
-      sessionStorage.setItem('quorum_nick', nick);
+      sessionStorage.setItem('silunet_nick', nick);
       window.location.href = '/play';
     }
   </script>

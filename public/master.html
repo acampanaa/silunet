@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quórum — Pantalla Maestra</title>
+  <title>Silunet — Pantalla Maestra</title>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -22,9 +22,25 @@
       background: #1a1a2e;
       border-bottom: 1px solid #2a2a4a;
     }
+    .brand { display: flex; align-items: center; gap: 14px; }
     .logo { font-size: 1.6rem; font-weight: 900; letter-spacing: -1px;
       background: linear-gradient(135deg, #7c3aed, #06b6d4);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    /* ── Branding institucional PUCE Sede Manabí ── */
+    .puce-brand {
+      display: flex; align-items: center; gap: 10px;
+      padding-left: 14px; border-left: 1px solid #2a2a4a;
+    }
+    .puce-mark {
+      width: 34px; height: 34px; border-radius: 7px; flex-shrink: 0;
+      background: linear-gradient(135deg, #1d4ed8, #0a2a6b);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.8rem; font-weight: 900; color: #fff; letter-spacing: -1px;
+      box-shadow: 0 0 0 1px #2a4a8a inset;
+    }
+    .puce-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .puce-name { font-size: 0.82rem; font-weight: 800; color: #cdd9f5; letter-spacing: 0.01em; }
+    .puce-sub  { font-size: 0.68rem; color: #6b7280; letter-spacing: 0.02em; }
     .nodes {
       display: flex; gap: 8px; align-items: center; font-size: 0.8rem; color: #6b7280;
     }
@@ -36,6 +52,10 @@
     .node-dot .dot { width: 8px; height: 8px; border-radius: 50%; }
     .dot.ok   { background: #10b981; box-shadow: 0 0 6px #10b981; }
     .dot.down { background: #6b7280; }
+    .node-dot.coord { border-color: #fbbf24; color: #fbbf24; }
+    .node-dot.coord .dot.ok { background: #fbbf24; box-shadow: 0 0 7px #fbbf24; }
+    .node-dot.offline { opacity: 0.55; }
+    .node-dot .star { font-size: 0.7rem; }
 
     /* ── Main layout ── */
     main {
@@ -150,18 +170,28 @@
 <body>
 
 <header>
-  <div class="logo">QUÓRUM</div>
+  <div class="brand">
+    <div class="logo">SILUNET</div>
+    <div class="puce-brand">
+      <div class="puce-mark">PUCE</div>
+      <div class="puce-text">
+        <span class="puce-name">PUCE Sede Manabí</span>
+        <span class="puce-sub">Ingeniería de Software</span>
+      </div>
+    </div>
+  </div>
   <div class="nodes" id="node-status">
-    <!-- Eje 4: panel de salud del clúster — placeholder hasta implementar heartbeats -->
-    <div class="node-dot"><span class="dot ok"></span>node1</div>
-    <div class="node-dot"><span class="dot down"></span>node2</div>
-    <div class="node-dot"><span class="dot down"></span>node3</div>
+    <!-- Eje 4: panel de salud del clúster — se llena por WS (CLUSTER_STATE). -->
+    <div class="node-dot"><span class="dot down"></span>conectando…</div>
   </div>
 </header>
 
 <main id="main-waiting" style="display:flex; align-items:center; justify-content:center; grid-template-columns:1fr;">
   <div class="waiting-center">
-    <div class="big-logo">QUÓRUM</div>
+    <div class="big-logo">SILUNET</div>
+    <p style="color:#9aa7c7; font-size:1rem; font-weight:600; letter-spacing:0.04em">
+      PUCE Sede Manabí · Ingeniería de Software
+    </p>
     <p style="color:#6b7280; font-size:1.1rem">Esperando jugadores...</p>
     <div class="qr-block">
       <div id="qr-canvas"></div>
@@ -235,9 +265,16 @@
 
   // Eje 4: el panel de salud del clúster se actualiza por WebSocket (push), no por polling.
   function renderNodes(nodes) {
-    document.getElementById('node-status').innerHTML = nodes.map(n => {
-      const label = n.isCoordinator ? `${n.id} ★` : n.id;
-      return `<div class="node-dot"><span class="dot ${n.up ? 'ok' : 'down'}"></span>${label}</div>`;
+    const el = document.getElementById('node-status');
+    if (!nodes || nodes.length === 0) {
+      el.innerHTML = `<div class="node-dot"><span class="dot down"></span>sin clúster</div>`;
+      return;
+    }
+    el.innerHTML = nodes.map(n => {
+      const cls  = (n.isCoordinator ? ' coord' : '') + (n.up ? '' : ' offline');
+      const star = n.isCoordinator ? `<span class="star" title="Coordinador">★</span>` : '';
+      return `<div class="node-dot${cls}" title="${n.up ? 'Activo' : 'Caído'}">`
+           + `<span class="dot ${n.up ? 'ok' : 'down'}"></span>${star}${n.id}</div>`;
     }).join('');
   }
 

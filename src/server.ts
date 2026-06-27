@@ -239,8 +239,8 @@ cluster.on('coordinator_changed', () => sendClusterState());
 const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-  // Las conexiones entre nodos se identifican por el header x-quorum-peer
-  if (req.headers['x-quorum-peer']) {
+  // Las conexiones entre nodos se identifican por el header x-silunet-peer
+  if (req.headers['x-silunet-peer']) {
     cluster.handleIncomingPeer(ws);
     return;
   }

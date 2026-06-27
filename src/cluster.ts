@@ -74,7 +74,7 @@ export class Cluster extends EventEmitter {
     return { nodes };
   }
 
-  // ── Conexiones entrantes (llamado por server.ts cuando detecta x-quorum-peer) ──
+  // ── Conexiones entrantes (llamado por server.ts cuando detecta x-silunet-peer) ──
 
   handleIncomingPeer(ws: WebSocket) {
     let peerId: string | null = null;
@@ -251,7 +251,7 @@ export class Cluster extends EventEmitter {
   }
 
   private connectToPeer(url: string) {
-    const ws = new WebSocket(url, { headers: { 'x-quorum-peer': '1' } });
+    const ws = new WebSocket(url, { headers: { 'x-silunet-peer': '1' } });
     let peerId: string | null = null;
 
     ws.on('open', () => {

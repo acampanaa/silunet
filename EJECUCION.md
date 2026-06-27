@@ -1,4 +1,4 @@
-# Cómo ejecutar Quórum — Guía paso a paso
+# Cómo ejecutar Silunet — Guía paso a paso
 
 Esta guía explica cómo descargar las dependencias y poner a correr el proyecto,
 primero en **un solo nodo** (lo más rápido para probar el juego) y luego como
@@ -23,13 +23,17 @@ Antes de empezar, instala en tu computadora:
 
 ---
 
-## 2. Descargar el proyecto
+## 2. Abrir el proyecto
 
-Clona el repositorio (o descarga el ZIP desde GitHub y descomprímelo):
+Si **ya tienes la carpeta del proyecto** (porque la descargaste o ya está en tu
+computadora), solo abre una terminal **dentro de ella** y continúa con el paso 3.
+
+Si todavía necesitas obtenerlo, clónalo (o descarga el ZIP desde GitHub y
+descomprímelo) y entra a la carpeta que se crea:
 
 ```bash
-git clone <URL-del-repositorio> quorum
-cd quorum
+git clone <URL-del-repositorio>
+cd silunet
 ```
 
 > A partir de aquí, todos los comandos se ejecutan **dentro de la carpeta del

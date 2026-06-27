@@ -1,4 +1,4 @@
-# Quórum — "¿Qué es esto?"
+# Silunet — "¿Qué es esto?"
 
 Proyecto integrador para las materias **Sistemas Distribuidos** y **Gestión
 para la Verificación y Validación de Software** (PUCE Sede Manabí).

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Silunet — Reporte Arquitectónico Técnico</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 60px;
+    background: #0f0f1a; color: #e8e8f0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 20px 40px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
+  }
+  .logo { font-size: 1.8rem; font-weight: 900; letter-spacing: -1px;
+    background: linear-gradient(135deg, #7c3aed, #06b6d4);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .puce { display:flex; align-items:center; gap:10px; padding-left:16px; border-left:1px solid #2a2a4a; }
+  .puce-mark { width:36px; height:36px; border-radius:7px;
+    background: linear-gradient(135deg, #1d4ed8, #0a2a6b);
+    display:flex; align-items:center; justify-content:center;
+    font-size:.78rem; font-weight:900; color:#fff; }
+  .puce-text { display:flex; flex-direction:column; line-height:1.15; }
+  .puce-name { font-size:.85rem; font-weight:800; color:#cdd9f5; }
+  .puce-sub  { font-size:.7rem;  color:#6b7280; }
+  .doc-title { margin-left:auto; text-align:right; font-size:.8rem; color:#9aa7c7; }
+  main { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+  section { margin-top: 40px; }
+  h2 { font-size: 1.35rem; color: #fff; border-left: 4px solid #06b6d4;
+       padding-left: 12px; margin-bottom: 6px; }
+  h2 .eje { font-size:.8rem; color:#06b6d4; font-weight:600; }
+  p.lead { color:#b9c2dd; margin: 4px 0 18px; }
+  .card { background:#15152a; border:1px solid #2a2a4a; border-radius:14px;
+          padding: 22px; overflow-x:auto; }
+  .mermaid { display:flex; justify-content:center; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:.92rem; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid #2a2a4a; }
+  th { color:#9aa7c7; font-weight:600; text-transform:uppercase; font-size:.72rem; letter-spacing:.05em; }
+  td.win { color:#fbbf24; font-weight:700; }
+  ul.findings { margin: 16px 0 0; padding-left: 0; list-style: none; }
+  ul.findings li { position:relative; padding-left: 26px; margin-bottom: 10px; color:#cdd5ec; }
+  ul.findings li::before { content:"✔"; position:absolute; left:0; color:#10b981; font-weight:900; }
+  code { background:#0f0f1a; border:1px solid #2a2a4a; border-radius:5px;
+         padding:1px 6px; font-size:.86em; color:#7dd3fc; }
+  .note { font-size:.82rem; color:#6b7280; margin-top:10px; }
+  @media print {
+    body { background:#fff; color:#111; }
+    header, .card { background:#fff; border-color:#ccc; }
+    .logo, .puce-name { -webkit-text-fill-color: initial; color:#111; background:none; }
+    section { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SILUNET</div>
+  <div class="puce">
+    <div class="puce-mark">PUCE</div>
+    <div class="puce-text">
+      <span class="puce-name">PUCE Sede Manabí</span>
+      <span class="puce-sub">Ingeniería de Software</span>
+    </div>
+  </div>
+  <div class="doc-title">Reporte Arquitectónico Técnico<br>Trivia de Siluetas Distribuida</div>
+</header>
+
+<main>
+
+  <!-- ───────────────────────── 1. ARQUITECTURA ───────────────────────── -->
+  <section>
+    <h2>1. Arquitectura de la red local del stand</h2>
+    <p class="lead">Topología Wi-Fi sin salida a internet: clúster de 3 nodos simétricos
+      (Node.js + <code>ws</code>), pantalla maestra de solo lectura y los celulares del público.</p>
+    <div class="card">
+      <pre class="mermaid">
+flowchart TB
+    R{{"Router Wi-Fi local&#10;(sin salida a internet)"}}
+
+    subgraph PUB["Público de la feria — celulares"]
+        direction LR
+        C1["Celular A&#10;/join entonces /play"]
+        C2["Celular B&#10;/join entonces /play"]
+        C3["Celular C&#10;/join entonces /play"]
+    end
+
+    MA["Pantalla Maestra&#10;/master (solo lectura)&#10;silueta + ranking + salud del clúster"]
+
+    subgraph CL["Clúster de 3 nodos simétricos · estado replicado en memoria"]
+        direction LR
+        N1["Nodo 1 ★ COORDINADOR&#10;estado maestro de la ronda"]
+        N2["Nodo 2 · réplica pasiva"]
+        N3["Nodo 3 · réplica pasiva"]
+    end
+
+    C1 -- "WebSocket" --> R
+    C2 -- "WebSocket" --> R
+    C3 -- "WebSocket" --> R
+    MA -- "WebSocket" --> R
+    R --- N1
+    R --- N2
+    R --- N3
+    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N2
+    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N3
+    N2 <== "heartbeats · elección Bully" ==> N3
+
+    classDef coord fill:#7c3aed22,stroke:#fbbf24,stroke-width:2px,color:#fff;
+    classDef rep   fill:#15152a,stroke:#2a4a8a,color:#cdd9f5;
+    classDef cli   fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
+    class N1 coord;
+    class N2,N3 rep;
+    class C1,C2,C3,MA cli;
+      </pre>
+    </div>
+    <p class="note">Los celulares y la pantalla maestra pueden conectarse al <code>/join</code> o
+      <code>/master</code> de <em>cualquier</em> nodo: todos comparten el mismo estado replicado.</p>
+  </section>
+
+  <!-- ───────────────────── 2. SECUENCIA — CARRERA CONCURRENTE ───────────────────── -->
+  <section>
+    <h2>2. Ciclo de vida de un acierto concurrente <span class="eje">— Eje 2 (Lamport) + Eje 3 (exclusión mutua)</span></h2>
+    <p class="lead">Dos jugadores en nodos distintos aciertan casi en el mismo milisegundo.
+      El candado FIFO del coordinador <strong>serializa</strong> el acceso al marcador y el reloj de
+      Lamport decide la posición. Quien "pierde la carrera" igual gana, pero en posición #2
+      (menos puntos); un segundo intento del mismo jugador se <strong>rechaza</strong>.</p>
+    <div class="card">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant A as Jugador A (Nodo 2)
+    participant B as Jugador B (Nodo 3)
+    participant N as Nodos 2 y 3 (seguidores)
+    participant CO as Nodo 1 ★ Coordinador
+    participant MA as Pantalla Maestra
+
+    Note over A,B: Ambos envían el intento correcto casi al mismo tiempo
+    A->>N: GUESS "MONITOR" (L_cliente=7)
+    B->>N: GUESS "MONITOR" (L_cliente=9)
+    N->>CO: N_FORWARD_GUESS A (lamport=7)
+    N->>CO: N_FORWARD_GUESS B (lamport=9)
+
+    rect rgb(40,30,70)
+    Note over CO: scoreboardLock.runExclusive() — sección crítica (Eje 3)
+    CO->>CO: A toma el candado · L=max(L,7)+1=21 · solver #1
+    CO-->>MA: CORRECT_ANSWER A · pos #1 · L=21
+    Note over CO: B estaba ENCOLADO (FIFO) hasta liberar el candado
+    CO->>CO: B entra · L=max(21,9)+1=22 · solver #2
+    CO-->>MA: CORRECT_ANSWER B · pos #2 · L=22
+    end
+
+    Note over A,CO: Rama de RECHAZO — si A reintenta tras haber acertado
+    A->>N: GUESS "MONITOR" (otra vez)
+    N->>CO: N_FORWARD_GUESS A
+    CO-->>A: ALREADY_SOLVED  (intento rechazado)
+
+    Note over CO,MA: ROUND_END — orden por Lamport: #1 A = 1000 pts · #2 B = 700 pts
+      </pre>
+    </div>
+  </section>
+
+  <!-- ─────────────────── 3. ANÁLISIS BAJO CONCURRENCIA ─────────────────── -->
+  <section>
+    <h2>3. Comportamiento del servidor bajo concurrencia simulada <span class="eje">— Eje 3</span></h2>
+    <p class="lead">Cuatro aciertos llegan casi simultáneamente con relojes de cliente
+      desordenados. El candado FIFO los <strong>embudo­na y procesa de a uno</strong>; el coordinador
+      asigna a cada uno un Lamport creciente que fija su posición y puntaje. Sin entrelazado,
+      sin puntajes perdidos ni duplicados.</p>
+    <div class="card">
+      <pre class="mermaid">
+flowchart LR
+    subgraph IN["4 aciertos casi simultáneos (Lamport de cliente desordenado)"]
+        direction TB
+        b1["Bot1 · L_cli=3"]
+        b2["Bot2 · L_cli=1"]
+        b3["Bot3 · L_cli=4"]
+        b4["Bot4 · L_cli=2"]
+    end
+    LOCK{{"Candado FIFO&#10;recurso: marcador&#10;(serializa el acceso)"}}
+    b1 --> LOCK
+    b2 --> LOCK
+    b3 --> LOCK
+    b4 --> LOCK
+    LOCK ==> s1["#1 · L=21 · 1000 pts"]
+    s1  ==> s2["#2 · L=22 · 700 pts"]
+    s2  ==> s3["#3 · L=23 · 400 pts"]
+    s3  ==> s4["#4 · L=24 · 100 pts"]
+
+    classDef ok fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
+    classDef res fill:#7c3aed22,stroke:#7c3aed,color:#fff;
+    class b1,b2,b3,b4 ok;
+    class s1,s2,s3,s4 res;
+      </pre>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Orden de llegada al candado</th><th>Lamport asignado</th><th>Posición lógica</th><th>Puntaje</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1.º en tomar el token</td><td>L = 21</td><td class="win">#1</td><td class="win">1000 pts</td></tr>
+        <tr><td>2.º (encolado)</td><td>L = 22</td><td>#2</td><td>700 pts</td></tr>
+        <tr><td>3.º (encolado)</td><td>L = 23</td><td>#3</td><td>400 pts</td></tr>
+        <tr><td>4.º (encolado)</td><td>L = 24</td><td>#4</td><td>100 pts</td></tr>
+      </tbody>
+    </table>
+
+    <ul class="findings">
+      <li><strong>Serialización explícita:</strong> toda la secuencia leer-modificar-escribir del
+        marcador corre dentro de <code>runExclusive()</code>; dos aciertos nunca se entrelazan.</li>
+      <li><strong>Sin inanición:</strong> la cola es FIFO — el que llega primero al coordinador
+        obtiene el token primero; nadie queda esperando indefinidamente.</li>
+      <li><strong>Orden determinista e independiente de la latencia:</strong> la posición la fija el
+        Lamport del coordinador (<code>max(local, recibido)+1</code>), no el reloj físico del celular.</li>
+      <li><strong>Puntaje atado a la posición, no al tiempo:</strong> los puntos se calculan al cerrar
+        la ronda con N ya conocido — el 1.º recibe 1000 y el último tiende a 100.</li>
+      <li><strong>Reproducible:</strong> <code>node scripts/sim-concurrencia.mjs ws://localhost:3001 4</code>
+        dispara los 4 aciertos y el log del servidor muestra <code>'marcador' ocupado → encolado</code>.</li>
+    </ul>
+    <p class="note">En el clúster de 3 nodos, los aciertos de seguidores llegan vía
+      <code>N_FORWARD_GUESS</code> y atraviesan el mismo candado del coordinador: el comportamiento
+      serializado es idéntico al mostrado.</p>
+  </section>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: { fontFamily: 'system-ui, sans-serif', fontSize: '14px' },
+    flowchart: { curve: 'basis' },
+    sequence: { showSequenceNumbers: false }
+  });
+</script>
+</body>
+</html>

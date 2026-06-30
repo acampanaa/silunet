@@ -144,9 +144,70 @@
     .medal { font-size: 1.4rem; }
     .final-nick { flex: 1; font-weight: 600; }
     .final-score { font-weight: 700; color: #06b6d4; }
+
+    /* ── v2: Perfil ── */
+    .profile-fab {
+      position: fixed; top: 14px; right: 14px; z-index: 20;
+      width: 44px; height: 44px; border-radius: 50%;
+      background: #1a1a2e; border: 1px solid #2a2a4a;
+      color: #f0f0f0; font-size: 1.3rem; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      transition: transform 0.1s, border-color 0.2s;
+    }
+    .profile-fab:hover  { border-color: #7c3aed; }
+    .profile-fab:active { transform: scale(0.92); }
+
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 30;
+      background: rgba(8,8,16,0.78);
+      display: none; align-items: center; justify-content: center; padding: 16px;
+      animation: fadeIn 0.18s ease;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 18px;
+      width: 100%; max-width: 380px; padding: 24px; position: relative;
+    }
+    .modal-close {
+      position: absolute; top: 14px; right: 16px;
+      background: none; border: none; color: #6b7280;
+      font-size: 1.5rem; cursor: pointer; line-height: 1;
+    }
+    .pf-name { font-size: 1.5rem; font-weight: 800; }
+    .pf-since { color: #6b7280; font-size: 0.8rem; margin-bottom: 18px; }
+    .pf-stats { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+    .pf-stat {
+      display: flex; justify-content: space-between; align-items: center;
+      background: #0f0f1a; border-radius: 10px; padding: 10px 14px; font-size: 0.95rem;
+    }
+    .pf-stat .v { font-weight: 800; color: #06b6d4; }
+    .pf-medals { font-size: 1.3rem; letter-spacing: 4px; }
+    .pf-recientes-title { font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #6b7280; margin-bottom: 8px; }
+    .pf-reciente {
+      display: flex; align-items: center; gap: 8px;
+      background: #0f0f1a; border-radius: 8px; padding: 8px 12px;
+      font-size: 0.85rem; margin-bottom: 4px;
+    }
+    .pf-reciente .nombre { flex: 1; }
+    .pf-reciente .pts { font-weight: 700; color: #06b6d4; }
+    .pf-empty { color: #6b7280; font-size: 0.85rem; text-align: center; padding: 12px 0; }
   </style>
 </head>
 <body>
+
+<!-- v2: botón flotante de perfil (se muestra tras el WELCOME) -->
+<button class="profile-fab" id="profile-fab" onclick="openProfile()" title="Mi perfil">👤</button>
+
+<!-- v2: modal de perfil -->
+<div class="modal-overlay" id="profile-modal">
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeProfile()">&times;</button>
+    <div id="pf-body">
+      <p class="pf-empty">Cargando...</p>
+    </div>
+  </div>
+</div>
 
 <!-- Pantalla: conectando -->
 <div id="s-connecting" class="screen active">
@@ -157,6 +218,7 @@
 <!-- Pantalla: esperando -->
 <div id="s-waiting" class="screen">
   <div class="logo">SILUNET</div>
+  <p class="wait-msg" id="w-greet"></p>
   <p class="wait-msg">Esperando que empiece la partida...</p>
   <div class="player-count" id="w-count">0 jugadores</div>
 </div>
@@ -224,7 +286,9 @@
   const ws = new WebSocket('ws://' + location.host);
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'JOIN', nick }));
+    // v2: enviar el token persistente si este celular ya jugó antes (identidad)
+    const token = localStorage.getItem('silunet_token');
+    ws.send(JSON.stringify({ type: 'JOIN', nick, token }));
     // Eje 4: heartbeat del celular al servidor cada 1000 ms
     setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
   };
@@ -245,6 +309,7 @@
       case 'ALREADY_SOLVED':  /* ignorar */             break;
       case 'ROUND_END':       handleRoundEnd(msg);      break;
       case 'RANKING':         handleRanking(msg);       break;
+      case 'PROFILE':         handleProfile(msg);       break;
       case 'PLAYER_LEFT':     showNotif(`🔌 ${msg.nick} se desconectó`, 'info', 2500); break;
       case 'ERROR':           showNotif(msg.message, 'error'); break;
     }
@@ -255,8 +320,16 @@
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleWelcome(msg) {
     myPlayerId = msg.playerId;
+    // v2: guardar la identidad persistente y reflejar el nick autoritativo del servidor
+    if (msg.token) localStorage.setItem('silunet_token', msg.token);
+    if (msg.nick)  { myNick = msg.nick; localStorage.setItem('silunet_nick', msg.nick); }
     showScreen('s-waiting');
     setCount(msg.playerCount);
+    // "¡Hola de nuevo!" si el servidor reconoció el token de este celular
+    const greet = document.getElementById('w-greet');
+    if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}! 👋` : `¡Bienvenido, ${myNick}!`;
+    // v2: ya hay identidad → habilitar el botón de perfil
+    document.getElementById('profile-fab').style.display = 'flex';
   }
 
   function handlePlayerCount(msg) {
@@ -337,6 +410,53 @@
       return;
     }
     renderMiniRanking(msg.entries);
+  }
+
+  // ── v2: Perfil ───────────────────────────────────────────────────────────────
+  function openProfile() {
+    const token = localStorage.getItem('silunet_token');
+    document.getElementById('pf-body').innerHTML = '<p class="pf-empty">Cargando...</p>';
+    document.getElementById('profile-modal').classList.add('active');
+    send({ type: 'GET_PROFILE', token });
+  }
+
+  function closeProfile() {
+    document.getElementById('profile-modal').classList.remove('active');
+  }
+
+  // cerrar al tocar el fondo oscuro
+  document.getElementById('profile-modal').addEventListener('click', e => {
+    if (e.target.id === 'profile-modal') closeProfile();
+  });
+
+  function handleProfile(msg) {
+    const body = document.getElementById('pf-body');
+    const p = msg.profile;
+    if (!p) {
+      body.innerHTML = '<p class="pf-empty">Aún no tienes historial. ¡Juega una partida!</p>';
+      return;
+    }
+    const desde = new Date(p.creadoEn).toLocaleDateString('es', { month: 'short', year: 'numeric' });
+    const m = p.medallas;
+    const recientes = p.recientes.length
+      ? p.recientes.map(r => {
+          const med = r.medalla === 'oro' ? '🥇' : r.medalla === 'plata' ? '🥈' : r.medalla === 'bronce' ? '🥉' : `#${r.puesto}`;
+          return `<div class="pf-reciente"><span>${med}</span><span class="nombre">${r.partida}</span><span class="pts">${r.puntos}</span></div>`;
+        }).join('')
+      : '<p class="pf-empty">Sin partidas todavía.</p>';
+
+    body.innerHTML = `
+      <div class="pf-name">👤 ${p.nick}</div>
+      <div class="pf-since">Jugando desde ${desde}</div>
+      <div class="pf-stats">
+        <div class="pf-stat"><span>🏆 Partidas ganadas</span><span class="v">${p.partidasGanadas}</span></div>
+        <div class="pf-stat"><span>🎮 Partidas jugadas</span><span class="v">${p.partidasJugadas}</span></div>
+        <div class="pf-stat"><span>⭐ Puntos acumulados</span><span class="v">${p.puntosAcumulados}</span></div>
+        <div class="pf-stat"><span>Medallas</span><span class="pf-medals">🥇${m.oro} 🥈${m.plata} 🥉${m.bronce}</span></div>
+      </div>
+      <p class="pf-recientes-title">Últimas partidas</p>
+      ${recientes}
+    `;
   }
 
   // ── Guess ──────────────────────────────────────────────────────────────────

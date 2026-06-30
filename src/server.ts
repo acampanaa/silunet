@@ -6,7 +6,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Game }          from './game';
 import { Cluster }       from './cluster';
-import { S2C, C2S, N2N } from './types';
+import { Store }         from './db';
+import { S2C, C2S, N2N, GameOverResult } from './types';
 
 // ── Configuración por instancia ───────────────────────────────────────────────
 const NODE_ID        = process.env.NODE_ID        ?? 'node1';
@@ -18,6 +19,11 @@ const PEER_URLS      = (process.env.PEERS ?? '').split(',').filter(Boolean);
 // El reloj Lamport es compartido entre game y cluster (mismo objeto).
 const game    = new Game();
 const cluster = new Cluster(NODE_ID, COORDINATOR_ID, game.clock, PEER_URLS);
+
+// v2: persistencia de identidad e historia. Cada nodo abre su propio archivo
+// (para que un seguidor promovido por Bully tenga un Store listo), pero SOLO el
+// coordinador resuelve identidad y escribe. La partida en vivo nunca lee de aquí.
+const store = new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MIME: Record<string, string> = {
@@ -144,6 +150,27 @@ game.on('broadcast', (msg: S2C) => {
   }
 });
 
+// ── v2: persistencia al cerrar la partida (Paso 3) ───────────────────────────
+// Game emite 'game_over' en el nodo que controla la partida. Solo el COORDINADOR
+// escribe la historia (Eje 4: la persistencia depende de quién fue electo líder).
+game.on('game_over', (result: GameOverResult) => {
+  if (!cluster.isCoordinator) return;
+  const nombre    = `Casa Abierta #${store.countPartidas() + 1}`;
+  const partidaId = store.createPartida(nombre, result.totalRounds);
+  let guardados = 0;
+  for (const s of result.standings) {
+    if (!s.token) continue; // jugador sin identidad persistente → no se historia
+    store.recordParticipacion(partidaId, {
+      token:   s.token,
+      puntos:  s.score,
+      puesto:  s.position,
+      medalla: s.medalla,
+    });
+    guardados++;
+  }
+  console.log(`[${NODE_ID}] 💾 "${nombre}" persistida (partida #${partidaId}, ${guardados} jugadores)`);
+});
+
 // ── Mensajes entre nodos ──────────────────────────────────────────────────────
 
 cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
@@ -167,12 +194,14 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía JOIN de un jugador al coordinador
     case 'N_FORWARD_JOIN': {
       if (!cluster.isCoordinator) return;
-      const player = game.addPlayer(msg.playerId, msg.nick);
+      // v2: resolver identidad persistente en la DB del coordinador
+      const id = store.findOrCreatePlayer(msg.token, msg.nick);
+      const player = game.addPlayer(msg.playerId, id.nick, id.token);
       // WELCOME → solo al jugador que se unió, en su nodo de origen
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
-        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount() },
+        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: id.token, returning: id.returning },
         lamport:  game.clock.tick(),
       });
       // Si hay ronda en curso, sincronizar estado al nuevo jugador
@@ -209,6 +238,18 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       if (!cluster.isCoordinator) return;
       game.startGame(msg.totalRounds ?? 10);
       break;
+
+    // v2: seguidor pidió un perfil → el coordinador lo lee de su DB y lo devuelve
+    case 'N_FORWARD_PROFILE': {
+      if (!cluster.isCoordinator) return;
+      cluster.sendToPeer(msg.originNode, {
+        type:     'N_SEND_TO',
+        playerId: msg.playerId,
+        payload:  { type: 'PROFILE', profile: store.getProfile(msg.token) },
+        lamport:  game.clock.tick(),
+      });
+      break;
+    }
 
     // Seguidor notifica que un jugador se desconectó
     case 'N_PLAYER_LEFT':
@@ -263,20 +304,24 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
         // PlayerId incluye nodeId para evitar colisiones entre nodos
         const playerId = `${NODE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const token    = msg.token ?? null; // v2: identidad persistente del celular
         client.playerId = playerId;
         client.role     = 'player';
 
         if (cluster.isCoordinator) {
-          game.addPlayer(playerId, nick);
-          send(ws, { type: 'WELCOME', playerId, nick, playerCount: game.getPlayerCount() });
+          // v2: el coordinador resuelve la identidad contra su DB (Eje 4: solo él escribe)
+          const id = store.findOrCreatePlayer(token, nick);
+          game.addPlayer(playerId, id.nick, id.token);
+          send(ws, { type: 'WELCOME', playerId, nick: id.nick, playerCount: game.getPlayerCount(), token: id.token, returning: id.returning });
           const roundInfo = game.getCurrentRoundInfo();
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
         } else {
-          // Seguidor: reenviar al coordinador; la respuesta llega como N_SEND_TO
+          // Seguidor: reenviar al coordinador (incluido el token); la respuesta llega como N_SEND_TO
           cluster.sendToCoordinator({
             type:       'N_FORWARD_JOIN',
             playerId,
             nick,
+            token,
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });
@@ -323,6 +368,26 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_START',
             totalRounds: msg.totalRounds ?? 10,
+            lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      // v2: el celular pide su perfil. La DB la tiene el coordinador; el seguidor
+      // reenvía y la respuesta vuelve por N_SEND_TO. Es una lectura puntual: NUNCA
+      // ocurre dentro del flujo de un GUESS (la partida en vivo no toca la DB).
+      case 'GET_PROFILE': {
+        const token = msg.token;
+        if (!token) { send(ws, { type: 'PROFILE', profile: null }); break; }
+        if (cluster.isCoordinator) {
+          send(ws, { type: 'PROFILE', profile: store.getProfile(token) });
+        } else if (client.playerId) {
+          cluster.sendToCoordinator({
+            type:       'N_FORWARD_PROFILE',
+            playerId:   client.playerId,
+            token,
+            originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });
         }

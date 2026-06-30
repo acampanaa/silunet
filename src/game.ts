@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot } from './types';
+import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult } from './types';
 import { getRandomRounds } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
@@ -108,8 +108,8 @@ export class Game extends EventEmitter {
 
   // --- Gestión de jugadores ---
 
-  addPlayer(id: string, nick: string): Player {
-    const player: Player = { id, nick, score: 0 };
+  addPlayer(id: string, nick: string, token?: string): Player {
+    const player: Player = { id, nick, score: 0, token };
     this.players.set(id, player);
     this.broadcast({ type: 'PLAYER_COUNT', count: this.players.size });
     return player;
@@ -274,6 +274,21 @@ export class Game extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.phase = 'gameEnd';
     this.broadcastRanking(true);
+
+    // v2: emitir el resultado final para que el coordinador lo persista (Paso 3).
+    // Es un evento interno, NO un broadcast de red: server.ts decide si guardar.
+    const medallas: Array<'oro' | 'plata' | 'bronce'> = ['oro', 'plata', 'bronce'];
+    const standings = [...this.players.values()]
+      .sort((a, b) => b.score - a.score)
+      .map((p, i) => ({
+        token:    p.token,
+        nick:     p.nick,
+        score:    p.score,
+        position: i + 1,
+        medalla:  medallas[i] ?? null,
+      }));
+    const result: GameOverResult = { totalRounds: this.rounds.length, standings };
+    this.emit('game_over', result);
   }
 
   private broadcastRanking(final: boolean) {

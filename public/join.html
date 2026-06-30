@@ -99,6 +99,14 @@
   </div>
 
   <script>
+    // v2: si este celular ya jugó antes, pre-llenar su apodo (identidad persistente)
+    const savedNick = localStorage.getItem('silunet_nick');
+    if (savedNick) {
+      const inp = document.getElementById('nick');
+      inp.value = savedNick;
+      inp.select();
+    }
+
     document.getElementById('nick').addEventListener('keydown', e => {
       if (e.key === 'Enter') join();
     });

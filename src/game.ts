@@ -32,7 +32,9 @@ export class Game extends EventEmitter {
   // --- Consultas de estado ---
 
   getPhase()       { return this.phase; }
-  getPlayerCount() { return this.players.size; }
+  // Cuenta solo conectados: un desconectado a mitad de partida sigue en el mapa
+  // (conserva puntaje) pero no debe inflar el contador que ve la pantalla maestra.
+  getPlayerCount() { return [...this.players.values()].filter(p => p.connected !== false).length; }
   getPlayer(id: string) { return this.players.get(id); }
 
   getRanking(): RankEntry[] {
@@ -108,19 +110,83 @@ export class Game extends EventEmitter {
 
   // --- Gestión de jugadores ---
 
-  addPlayer(id: string, nick: string, token?: string): Player {
-    const player: Player = { id, nick, score: 0, token };
+  /**
+   * Eje 4 (resiliencia de cliente): si `token` coincide con un jugador que sigue
+   * en el mapa pero marcado `connected: false` (se cayó a mitad de partida, de
+   * este nodo o de otro tras un failover), lo RECONECTA bajo el nuevo `id` de
+   * sesión en lugar de crear uno nuevo con puntaje 0. Así un celular puede
+   * perder la señal, reconectar por cualquier nodo vivo del clúster con el
+   * mismo token, y seguir jugando sin perder lo acumulado en esta partida.
+   */
+  addPlayer(id: string, nick: string, token: string | undefined, originNode: string): Player {
+    if (token) {
+      const existing = [...this.players.values()].find(p => p.token === token && p.connected === false);
+      if (existing) {
+        this.players.delete(existing.id);
+        existing.id         = id;
+        existing.nick        = nick;
+        existing.connected  = true;
+        existing.originNode = originNode;
+        this.players.set(id, existing);
+        this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
+        return existing;
+      }
+    }
+    const player: Player = { id, nick, score: 0, token, connected: true, originNode };
     this.players.set(id, player);
-    this.broadcast({ type: 'PLAYER_COUNT', count: this.players.size });
+    this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
     return player;
+  }
+
+  /** ¿Este jugador tiene puntaje acumulado en la partida en curso y podría reconectar? */
+  wasConnected(token: string | undefined): boolean {
+    if (!token) return false;
+    const p = [...this.players.values()].find(pl => pl.token === token);
+    return !!p && p.connected === false;
+  }
+
+  /**
+   * Eje 4: se llama cuando cambia la topología del clúster (un nodo cae, o
+   * este nodo acaba de ganar la elección Bully). Un jugador cuyo `originNode`
+   * ya no está vivo es un FANTASMA: su WebSocket real vivía en el nodo que
+   * murió, y ese nodo jamás alcanzó a avisar "se desconectó" (murió entero,
+   * no cerró prolijamente). Sin esto quedaría `connected: true` para siempre
+   * -> su propio intento de reconexión (mismo token) nunca lo encontraría
+   * como desconectado, perdería su puntaje y se le crearía un duplicado.
+   */
+  pruneToLivingNodes(livingNodeIds: string[]) {
+    const living  = new Set(livingNodeIds);
+    let changed = false;
+    for (const [id, p] of [...this.players]) {
+      if (p.connected === false) continue;
+      if (!p.originNode || living.has(p.originNode)) continue;
+      changed = true;
+      if (this.phase === 'playing' || this.phase === 'roundEnd') {
+        p.connected = false;
+      } else {
+        this.players.delete(id);
+      }
+      this.broadcast({ type: 'PLAYER_LEFT', nick: p.nick });
+    }
+    if (changed) this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
   }
 
   removePlayer(id: string) {
     const player = this.players.get(id);
-    this.players.delete(id);
+    if (!player) return;
+
+    // Eje 4: mientras hay partida en curso, NO se borra al jugador -> conserva su
+    // puntaje para poder reconectarse (mismo token) por este nodo o por otro tras
+    // un failover. Fuera de partida (lobby / fin de juego) no hay nada que
+    // proteger, así que se elimina de inmediato como antes.
+    if (this.phase === 'playing' || this.phase === 'roundEnd') {
+      player.connected = false;
+    } else {
+      this.players.delete(id);
+    }
     // Eje 4: avisar al stand para mostrar "Jugador X: Desconectado"
-    if (player) this.broadcast({ type: 'PLAYER_LEFT', nick: player.nick });
-    this.broadcast({ type: 'PLAYER_COUNT', count: this.players.size });
+    this.broadcast({ type: 'PLAYER_LEFT', nick: player.nick });
+    this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
   }
 
   // --- Control de partida ---
@@ -129,7 +195,12 @@ export class Game extends EventEmitter {
     if (this.phase !== 'waiting' && this.phase !== 'gameEnd') return false;
     if (this.timer) clearInterval(this.timer);
 
-    for (const p of this.players.values()) p.score = 0;
+    // Purga a quien se quedó desconectado de la partida anterior sin volver:
+    // una partida nueva es el corte natural de la ventana de reconexión.
+    for (const [id, p] of [...this.players]) {
+      if (p.connected === false) this.players.delete(id);
+      else p.score = 0;
+    }
     this.rounds = getRandomRounds(Math.min(totalRounds, 12));
     this.currentRoundIndex = -1;
     this.nextRound();

@@ -157,6 +157,16 @@
     .profile-fab:hover  { border-color: #7c3aed; }
     .profile-fab:active { transform: scale(0.92); }
 
+    /* Eje 4: aviso de reconexión (se cayó el nodo -> reintentando por el clúster) */
+    .reconnect-banner {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+      background: #78350f; color: #fef3c7;
+      font-size: 0.85rem; font-weight: 600; text-align: center;
+      padding: 10px 12px; transform: translateY(-100%);
+      transition: transform 0.2s ease;
+    }
+    .reconnect-banner.show { transform: translateY(0); }
+
     .modal-overlay {
       position: fixed; inset: 0; z-index: 30;
       background: rgba(8,8,16,0.78);
@@ -195,6 +205,9 @@
   </style>
 </head>
 <body>
+
+<!-- Eje 4: aviso de reconexión -->
+<div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión, reconectando...</div>
 
 <!-- v2: botón flotante de perfil (se muestra tras el WELCOME) -->
 <button class="profile-fab" id="profile-fab" onclick="openProfile()" title="Mi perfil">👤</button>
@@ -282,20 +295,61 @@
   function lTick()         { return ++lamport; }
   function lUpdate(remote) { lamport = Math.max(lamport, remote ?? 0) + 1; }
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
-  const ws = new WebSocket('ws://' + location.host);
+  // ── WebSocket con reconexión automática al clúster (Eje 4) ────────────────────
+  // window.SILUNET_NODES lo inyecta server.ts al servir /play: la URL de este
+  // nodo + la de sus peers (derivada de PEERS). Si el nodo al que estamos
+  // conectados se cae (o pierde una elección Bully), reintentamos aquí mismo
+  // unas veces y luego rotamos al siguiente nodo vivo del clúster, sin recargar
+  // la página. El servidor reconoce el mismo token y restaura el puntaje
+  // acumulado de esta partida (ver Game.addPlayer -> reconexión por token).
+  let ws;
+  let pingTimer;
+  let reconnectTimer;
+  let reconnectAttempt = 0;
+  let nodeIdx = 0;
+  const nodeList = buildNodeList();
 
-  ws.onopen = () => {
-    // v2: enviar el token persistente si este celular ya jugó antes (identidad)
-    const token = localStorage.getItem('silunet_token');
-    ws.send(JSON.stringify({ type: 'JOIN', nick, token }));
-    // Eje 4: heartbeat del celular al servidor cada 1000 ms
-    setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
-  };
+  function buildNodeList() {
+    const self = 'ws://' + location.host;
+    const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+    const others = (window.SILUNET_NODES || []).map(httpToWs).filter(u => u !== self);
+    return [self, ...others];
+  }
 
-  ws.onclose = () => showNotif('Conexión perdida. Recarga la página.', 'error', 0);
+  function connectWS() {
+    ws = new WebSocket(nodeList[nodeIdx]);
 
-  ws.onmessage = (event) => {
+    ws.onopen = () => {
+      reconnectAttempt = 0;
+      hideReconnecting();
+      // v2: enviar el token persistente si este celular ya jugó antes (identidad).
+      // Eje 4: si veníamos de una caída mid-partida, este mismo token es lo que
+      // le permite al servidor reconocernos y devolvernos el puntaje acumulado.
+      const token = localStorage.getItem('silunet_token');
+      send({ type: 'JOIN', nick, token });
+      clearInterval(pingTimer);
+      // Eje 4: heartbeat del celular al servidor cada 1000 ms
+      pingTimer = setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
+    };
+
+    ws.onmessage = onSocketMessage;
+
+    ws.onclose = () => {
+      clearInterval(pingTimer);
+      showReconnecting();
+      reconnectAttempt++;
+      // Tras 2 intentos seguidos al mismo nodo, prueba el siguiente del clúster
+      // (puede ser el que acaba de caerse -> nunca va a volver a responder).
+      if (reconnectAttempt > 2 && nodeList.length > 1) {
+        nodeIdx = (nodeIdx + 1) % nodeList.length;
+        reconnectAttempt = 0;
+      }
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connectWS, 1200);
+    };
+  }
+
+  function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
     // Eje 2: sincronizar reloj local con cualquier timestamp del servidor
     if (msg.lamport != null) lUpdate(msg.lamport);
@@ -313,9 +367,20 @@
       case 'PLAYER_LEFT':     showNotif(`🔌 ${msg.nick} se desconectó`, 'info', 2500); break;
       case 'ERROR':           showNotif(msg.message, 'error'); break;
     }
-  };
+  }
 
-  function send(msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+  function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+  // El banner solo tiene sentido si ya habíamos llegado a jugar una vez; el
+  // primer intento de conexión ya lo cubre la pantalla "Conectando...".
+  function showReconnecting() {
+    if (myPlayerId) document.getElementById('reconnect-banner').classList.add('show');
+  }
+  function hideReconnecting() {
+    document.getElementById('reconnect-banner').classList.remove('show');
+  }
+
+  connectWS();
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleWelcome(msg) {
@@ -323,11 +388,26 @@
     // v2: guardar la identidad persistente y reflejar el nick autoritativo del servidor
     if (msg.token) localStorage.setItem('silunet_token', msg.token);
     if (msg.nick)  { myNick = msg.nick; localStorage.setItem('silunet_nick', msg.nick); }
-    showScreen('s-waiting');
-    setCount(msg.playerCount);
-    // "¡Hola de nuevo!" si el servidor reconoció el token de este celular
+
+    // Eje 4: si el servidor nos reconoció por token con puntaje de esta partida
+    // en curso, es una RECONEXIÓN (nuestro nodo se cayó o perdimos heartbeat) —
+    // restauramos el puntaje autoritativo y NO volvemos a "esperando": el próximo
+    // TICK/ROUND_START que llegue nos deja donde corresponde.
+    if (typeof msg.score === 'number') {
+      myScore = msg.score;
+      document.getElementById('p-score').textContent = myScore + ' pts';
+    }
+    hideReconnecting();
+
     const greet = document.getElementById('w-greet');
-    if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}! 👋` : `¡Bienvenido, ${myNick}!`;
+    if (msg.reconnected) {
+      if (greet) greet.textContent = `Reconectado, ${myNick} 🔄 — sigues en la partida`;
+    } else {
+      showScreen('s-waiting');
+      // "¡Hola de nuevo!" si el servidor reconoció el token de este celular
+      if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}! 👋` : `¡Bienvenido, ${myNick}!`;
+    }
+    setCount(msg.playerCount);
     // v2: ya hay identidad → habilitar el botón de perfil
     document.getElementById('profile-fab').style.display = 'flex';
   }

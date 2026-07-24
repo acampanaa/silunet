@@ -46,6 +46,17 @@ function getLocalIP(): string {
   return (wifi ?? all[0])?.addr ?? 'localhost';
 }
 
+// Eje 4 (resiliencia de cliente): direcciones HTTP de los otros nodos del clúster,
+// derivadas de PEERS (mismo host:puerto que ya usa el WS inter-nodo). Se inyectan
+// en /play para que un celular que pierde la conexión con ESTE nodo (se cayó o
+// perdió la elección Bully) pueda reconectarse solo por cualquier otro nodo vivo,
+// sin perder su sesión ni su puntaje de la partida en curso.
+function siblingNodeUrls(): string[] {
+  const self      = `http://${getLocalIP()}:${PORT}`;
+  const siblings  = PEER_URLS.map(u => u.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
+  return [self, ...siblings];
+}
+
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
 const httpServer = http.createServer((req, res) => {
@@ -84,8 +95,15 @@ const httpServer = http.createServer((req, res) => {
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext  = path.extname(filePath);
+    let body: Buffer | string = data;
+    if (htmlFile === 'play.html') {
+      // Eje 4: la lista de nodos viaja embebida en el HTML (no por WS), para que
+      // ya esté disponible en el celular ANTES de que el nodo actual se caiga.
+      const nodesScript = `<script>window.SILUNET_NODES = ${JSON.stringify(siblingNodeUrls())};</script>\n`;
+      body = data.toString('utf8').replace('</head>', `${nodesScript}</head>`);
+    }
     res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
-    res.end(data);
+    res.end(body);
   });
 });
 
@@ -150,6 +168,26 @@ game.on('broadcast', (msg: S2C) => {
   }
 });
 
+// v2 + Eje 4: resuelve una identidad de JOIN en el coordinador.
+//
+// Primero intenta una RECONEXIÓN EN VIVO: si el token que trae el celular ya
+// tiene un jugador desconectado en la partida en curso, lo retoma desde memoria
+// (que se replica entre nodos vía N_REPLICATE) SIN tocar la base de datos. Esto
+// es necesario porque cada nodo tiene su propio archivo SQLite: si el celular se
+// reconecta a un nodo distinto tras un failover, la DB de ese nodo nunca ha visto
+// ese token y le asignaría uno nuevo, perdiendo el puntaje acumulado de HOY. Solo
+// cuando no hay partida en curso con ese token se consulta/crea la identidad
+// persistente (historial entre partidas) en la DB local.
+function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string) {
+  if (token && game.wasConnected(token)) {
+    const player = game.addPlayer(playerId, nick, token, originNode);
+    return { player, token, returning: true, reconnected: true };
+  }
+  const id     = store.findOrCreatePlayer(token, nick);
+  const player = game.addPlayer(playerId, id.nick, id.token, originNode);
+  return { player, token: id.token, returning: id.returning, reconnected: false };
+}
+
 // ── v2: persistencia al cerrar la partida (Paso 3) ───────────────────────────
 // Game emite 'game_over' en el nodo que controla la partida. Solo el COORDINADOR
 // escribe la historia (Eje 4: la persistencia depende de quién fue electo líder).
@@ -194,14 +232,12 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía JOIN de un jugador al coordinador
     case 'N_FORWARD_JOIN': {
       if (!cluster.isCoordinator) return;
-      // v2: resolver identidad persistente en la DB del coordinador
-      const id = store.findOrCreatePlayer(msg.token, msg.nick);
-      const player = game.addPlayer(msg.playerId, id.nick, id.token);
+      const { player, token: playerToken, returning, reconnected } = resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode);
       // WELCOME → solo al jugador que se unió, en su nodo de origen
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
-        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: id.token, returning: id.returning },
+        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected },
         lamport:  game.clock.tick(),
       });
       // Si hay ronda en curso, sincronizar estado al nuevo jugador
@@ -263,9 +299,19 @@ cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] ✓ Pe
 cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] ✗ Peer caído: ${id}`));
 cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] ⚠ Heartbeat perdido de ${id} (Eje 4)`));
 
+// Eje 4: cuando el coordinador (el que sea, ahora o tras un failover) pierde un
+// nodo, cualquier jugador cuyo WebSocket vivía ahí queda "fantasma" (ver
+// Player.originNode / Game.pruneToLivingNodes) -> hay que soltarlo para que su
+// propia reconexión (mismo token, por cualquier nodo vivo) lo encuentre y le
+// devuelva el puntaje, en vez de crearle un jugador duplicado desde cero.
+cluster.on('peer_disconnected', () => {
+  if (cluster.isCoordinator) game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
+});
+
 // Eje 4: este nodo ganó la elección Bully → asume el control de la partida.
 cluster.on('became_coordinator', () => {
   console.log(`[${NODE_ID}] ★ Asumo coordinación: reanudo la partida desde la réplica`);
+  game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
   game.resume();
 });
 cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
@@ -309,10 +355,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         client.role     = 'player';
 
         if (cluster.isCoordinator) {
-          // v2: el coordinador resuelve la identidad contra su DB (Eje 4: solo él escribe)
-          const id = store.findOrCreatePlayer(token, nick);
-          game.addPlayer(playerId, id.nick, id.token);
-          send(ws, { type: 'WELCOME', playerId, nick: id.nick, playerCount: game.getPlayerCount(), token: id.token, returning: id.returning });
+          const { player, token: playerToken, returning, reconnected } = resolveJoin(playerId, nick, token, NODE_ID);
+          send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected });
           const roundInfo = game.getCurrentRoundInfo();
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
         } else {

@@ -7,6 +7,14 @@ export interface Player {
   // v2: identidad persistente del jugador (token guardado en su propio celular).
   // Viaja en el snapshot para que el coordinador electo sepa a quién persistir.
   token?: string;
+  // Eje 4 (resiliencia de cliente): false mientras el celular está desconectado a
+  // mitad de partida. El jugador NO se borra del mapa -> conserva su puntaje para
+  // poder reconectarse (mismo token) sin perder lo acumulado en la partida en curso.
+  connected?: boolean;
+  // Eje 4: nodo donde vive el WebSocket real de este jugador ahora mismo. Si ese
+  // nodo cae, es lo único que permite distinguir "sigue conectado" de "fantasma"
+  // (ver Game.pruneToLivingNodes).
+  originNode?: string;
 }
 
 export interface WordEntry {
@@ -81,7 +89,9 @@ export interface GameSnapshot {
 // Mensajes servidor → cliente
 export type S2C =
   // v2: token = identidad persistente (el celular lo guarda); returning = "ya jugaste antes"
-  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean }
+  // score = puntaje autoritativo actual (para reconstruirlo tras una reconexión);
+  // reconnected = true si esta identidad ya tenía puntaje en la partida en curso.
+  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean }
   | { type: 'PLAYER_COUNT'; count: number }
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }

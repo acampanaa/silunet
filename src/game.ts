@@ -7,6 +7,7 @@ import { Mutex } from './mutex';
 const TOTAL_TIME   = 24;  // segundos por ronda
 const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
 const GAP_BETWEEN  = 4;   // segundos entre rondas
+const COUNTDOWN_FROM = 3; // "3, 2, 1, ¡YA!" antes de que arranque el timer real
 
 // Eje 2+3: el puntaje depende de la POSICIÓN LÓGICA de llegada (orden de Lamport
 // resuelto por el coordinador), NO del tiempo ni de la latencia de red del celular.
@@ -22,6 +23,7 @@ export class Game extends EventEmitter {
   private currentRoundIndex  = -1;
   private round?: RoundState;
   private timer?: ReturnType<typeof setInterval>;
+  private countdownTimer?: ReturnType<typeof setTimeout>;
 
   // Eje 2: reloj de Lamport del nodo
   readonly clock = new LamportClock();
@@ -105,18 +107,12 @@ export class Game extends EventEmitter {
    */
   resume(): void {
     if (this.timer) clearInterval(this.timer);
-    if (this.phase === 'playing' && this.round) {
-      this.broadcast({
-        type:        'ROUND_START',
-        roundNumber: this.currentRoundIndex + 1,
-        totalRounds: this.rounds.length,
-        category:    this.round.wordEntry.category,
-        svg:         this.round.wordEntry.svg,
-        hiddenWord:  this.round.hiddenWord.join(' '),
-        timeLeft:    this.round.timeLeft,
-        totalTime:   this.round.totalTime,
-      });
-      this.timer = setInterval(() => this.tick(), 1000);
+    if (this.countdownTimer) clearTimeout(this.countdownTimer);
+    if ((this.phase === 'playing' || this.phase === 'countdown') && this.round) {
+      // Si la caída agarró a mitad de la cuenta regresiva, no la repite desde
+      // el nuevo coordinador (ya es bastante desincronización con el propio
+      // failover) -> salta directo a jugar con el timeLeft que ya tenía.
+      this.startRoundTimer();
     } else if (this.phase === 'roundEnd') {
       setTimeout(() => this.nextRound(), GAP_BETWEEN * 1000);
     }
@@ -159,6 +155,11 @@ export class Game extends EventEmitter {
     return !!p && p.connected === false;
   }
 
+  /** ¿Hay una partida en curso donde el puntaje de alguien esté en juego? */
+  private isGameLive(): boolean {
+    return this.phase === 'countdown' || this.phase === 'playing' || this.phase === 'roundEnd';
+  }
+
   /**
    * Eje 4: se llama cuando cambia la topología del clúster (un nodo cae, o
    * este nodo acaba de ganar la elección Bully). Un jugador cuyo `originNode`
@@ -175,7 +176,7 @@ export class Game extends EventEmitter {
       if (p.connected === false) continue;
       if (!p.originNode || living.has(p.originNode)) continue;
       changed = true;
-      if (this.phase === 'playing' || this.phase === 'roundEnd') {
+      if (this.isGameLive()) {
         p.connected = false;
       } else {
         this.players.delete(id);
@@ -193,7 +194,7 @@ export class Game extends EventEmitter {
     // puntaje para poder reconectarse (mismo token) por este nodo o por otro tras
     // un failover. Fuera de partida (lobby / fin de juego) no hay nada que
     // proteger, así que se elimina de inmediato como antes.
-    if (this.phase === 'playing' || this.phase === 'roundEnd') {
+    if (this.isGameLive()) {
       player.connected = false;
     } else {
       this.players.delete(id);
@@ -246,19 +247,47 @@ export class Game extends EventEmitter {
       totalTime:     TOTAL_TIME,
       solvers:       [],
     };
-    this.phase = 'playing';
+    this.phase = 'countdown';
 
+    // Se conoce la ronda (categoría/silueta/palabra) pero el timer real
+    // todavía no arranca: los clientes pintan la pantalla y esperan la
+    // cuenta regresiva. Eje 1: es un broadcast más, todos la ven a la vez.
     this.broadcast({
-      type:        'ROUND_START',
+      type:        'ROUND_PREVIEW',
       roundNumber: this.currentRoundIndex + 1,
       totalRounds: this.rounds.length,
       category:    entry.category,
       svg:         entry.svg,
       hiddenWord:  this.round.hiddenWord.join(' '),
-      timeLeft:    TOTAL_TIME,
-      totalTime:   TOTAL_TIME,
     });
 
+    this.runCountdown(COUNTDOWN_FROM);
+  }
+
+  /** "3, 2, 1, ¡YA!" — al llegar a 0 arranca el timer real (mismo instante). */
+  private runCountdown(secondsLeft: number) {
+    this.broadcast({ type: 'COUNTDOWN', value: secondsLeft });
+    if (secondsLeft > 0) {
+      this.countdownTimer = setTimeout(() => this.runCountdown(secondsLeft - 1), 1000);
+    } else {
+      this.startRoundTimer();
+    }
+  }
+
+  /** Arranca (o reanuda, ver resume()) el timer real de la ronda ya conocida. */
+  private startRoundTimer() {
+    if (!this.round) return;
+    this.phase = 'playing';
+    this.broadcast({
+      type:        'ROUND_START',
+      roundNumber: this.currentRoundIndex + 1,
+      totalRounds: this.rounds.length,
+      category:    this.round.wordEntry.category,
+      svg:         this.round.wordEntry.svg,
+      hiddenWord:  this.round.hiddenWord.join(' '),
+      timeLeft:    this.round.timeLeft,
+      totalTime:   this.round.totalTime,
+    });
     this.timer = setInterval(() => this.tick(), 1000);
   }
 

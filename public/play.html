@@ -167,6 +167,24 @@
     }
     .reconnect-banner.show { transform: translateY(0); }
 
+    /* Cuenta regresiva "3, 2, 1, ¡YA!" antes de cada ronda (sincroniza al
+       público) — la manda el servidor (COUNTDOWN), no es local por celular. */
+    .countdown-overlay {
+      position: fixed; inset: 0; z-index: 25;
+      background: rgba(15,15,26,0.9);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 10px;
+    }
+    .countdown-overlay.show { display: flex; }
+    .countdown-overlay .cd-num {
+      font-size: 6rem; font-weight: 900;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .countdown-overlay .cd-num.pulse { animation: cdPulse 0.4s ease; }
+    @keyframes cdPulse { 0% { transform: scale(0.5); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
+    .countdown-overlay .cd-label { color: #9ca3af; font-size: 1rem; }
+
     .modal-overlay {
       position: fixed; inset: 0; z-index: 30;
       background: rgba(8,8,16,0.78);
@@ -203,11 +221,18 @@
     .pf-reciente .pts { font-weight: 700; color: #06b6d4; }
     .pf-empty { color: #6b7280; font-size: 0.85rem; text-align: center; padding: 12px 0; }
   </style>
+  <script src="/sounds.js"></script>
 </head>
 <body>
 
 <!-- Eje 4: aviso de reconexión -->
 <div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión, reconectando...</div>
+
+<!-- Cuenta regresiva "3, 2, 1, ¡YA!" (COUNTDOWN del servidor, sincronizada) -->
+<div class="countdown-overlay" id="countdown-overlay">
+  <span class="cd-num" id="cd-num">3</span>
+  <span class="cd-label" id="cd-label">Prepárate...</span>
+</div>
 
 <!-- v2: botón flotante de perfil (se muestra tras el WELCOME) -->
 <button class="profile-fab" id="profile-fab" onclick="openProfile()" title="Mi perfil">👤</button>
@@ -356,6 +381,8 @@
     switch (msg.type) {
       case 'WELCOME':         handleWelcome(msg);       break;
       case 'PLAYER_COUNT':    handlePlayerCount(msg);   break;
+      case 'ROUND_PREVIEW':   handleRoundPreview(msg);  break;
+      case 'COUNTDOWN':       handleCountdown(msg);     break;
       case 'ROUND_START':     handleRoundStart(msg);    break;
       case 'TICK':            handleTick(msg);          break;
       case 'CORRECT_ANSWER':  handleCorrectAnswer(msg); break;
@@ -416,24 +443,56 @@
     setCount(msg.count);
   }
 
-  function handleRoundStart(msg) {
-    solved = false;
-    totalTime = msg.totalTime;
-    myScore = myScore; // mantener acumulado
-
+  // Pinta lo que ROUND_PREVIEW y ROUND_START comparten (categoría/silueta/
+  // palabra). Un jugador que se une a mitad de ronda solo recibe ROUND_START
+  // (sin preview previo) -> tiene que poder pintar la pantalla igual.
+  function paintRound(msg) {
     document.getElementById('p-round').textContent    = `Ronda ${msg.roundNumber}/${msg.totalRounds}`;
     document.getElementById('p-category').textContent = msg.category;
     document.getElementById('p-svg').innerHTML        = msg.svg;
     renderHiddenWord(msg.hiddenWord);
-    updateTimer(msg.timeLeft, msg.totalTime);
     clearNotif();
-    enableInput();
     showScreen('s-playing');
+  }
+
+  // La ronda ya se conoce (categoría/silueta/palabra) pero el timer real
+  // todavía no arranca: el servidor va a mandar la cuenta regresiva.
+  function handleRoundPreview(msg) {
+    solved = false;
+    paintRound(msg);
+    disableInput();
+    document.getElementById('countdown-overlay').classList.add('show');
+  }
+
+  // "3, 2, 1, ¡YA!" — la manda el servidor para que todos los celulares y el
+  // proyector la vean sincronizada (Eje 1), no cada uno por su cuenta.
+  function handleCountdown(msg) {
+    const numEl   = document.getElementById('cd-num');
+    const labelEl = document.getElementById('cd-label');
+    const isGo    = msg.value <= 0;
+    numEl.textContent   = isGo ? '¡YA!' : msg.value;
+    labelEl.textContent = isGo ? '' : 'Prepárate...';
+    numEl.classList.remove('pulse');
+    void numEl.offsetWidth; // reflow para reiniciar la animación
+    numEl.classList.add('pulse');
+    AudioFX.countdownBeep(isGo);
+  }
+
+  function handleRoundStart(msg) {
+    // solved solo se resetea si esto NO vino precedido de un ROUND_PREVIEW
+    // (unirse a mitad de ronda) — si vino de la cuenta regresiva, ya estaba en false.
+    solved = false;
+    totalTime = msg.totalTime;
+    paintRound(msg);
+    document.getElementById('countdown-overlay').classList.remove('show');
+    updateTimer(msg.timeLeft, msg.totalTime);
+    enableInput();
   }
 
   function handleTick(msg) {
     updateTimer(msg.timeLeft, totalTime);
     renderHiddenWord(msg.hiddenWord);
+    if (msg.timeLeft > 0 && msg.timeLeft <= 5) AudioFX.tick();
   }
 
   function handleCorrectAnswer(msg) {
@@ -444,6 +503,7 @@
       showNotif(`¡Correcto! Llegaste #${msg.position} · puntos al cierre  [L=${msg.lamport}]`, 'success', 0);
       disableInput();
       solved = true;
+      AudioFX.correct();
     } else {
       showNotif(`${msg.nick} acertó · #${msg.position}  [L=${msg.lamport}]`, 'info', 3000);
     }
@@ -457,6 +517,7 @@
     setTimeout(() => inp.classList.remove('shake'), 400);
     inp.value = '';
     showNotif('Incorrecto, intenta de nuevo.', 'error', 2000);
+    AudioFX.wrong();
   }
 
   function handleRoundEnd(msg) {
@@ -475,6 +536,7 @@
       ).join('');
     }
     showScreen('s-roundEnd');
+    AudioFX.roundEnd(msg.solvers.length > 0);
   }
 
   function handleRanking(msg) {
@@ -487,6 +549,7 @@
     if (msg.final) {
       renderFinalRanking(msg.entries);
       showScreen('s-gameEnd');
+      AudioFX.gameEnd();
       return;
     }
     renderMiniRanking(msg.entries);

@@ -87,6 +87,24 @@
     .engine-chip.election.show { display: flex; }
     .engine-log { flex: 1; min-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+    /* Cuenta regresiva "3, 2, 1, ¡YA!" antes de cada ronda — el servidor la
+       manda a todos a la vez (Eje 1), no es una animación local del master. */
+    .countdown-overlay {
+      position: fixed; inset: 0; z-index: 25;
+      background: rgba(15,15,26,0.92);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 14px;
+    }
+    .countdown-overlay.show { display: flex; }
+    .countdown-overlay .cd-num {
+      font-size: 10rem; font-weight: 900;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .countdown-overlay .cd-num.pulse { animation: cdPulse 0.4s ease; }
+    @keyframes cdPulse { 0% { transform: scale(0.5); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
+    .countdown-overlay .cd-label { color: #9ca3af; font-size: 1.3rem; }
+
     /* ── Main layout ── */
     main {
       flex: 1; display: grid;
@@ -216,11 +234,18 @@
   <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
        internet, así que una dependencia externa aquí rompería el QR entero. -->
   <script src="/vendor/qrcode.min.js"></script>
+  <script src="/sounds.js"></script>
 </head>
 <body>
 
 <!-- Eje 4: aviso de reconexión -->
 <div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión con el nodo, reconectando...</div>
+
+<!-- Cuenta regresiva "3, 2, 1, ¡YA!" (COUNTDOWN del servidor, sincronizada) -->
+<div class="countdown-overlay" id="countdown-overlay">
+  <span class="cd-num" id="cd-num">3</span>
+  <span class="cd-label" id="cd-label">Prepárate...</span>
+</div>
 
 <header>
   <div class="brand">
@@ -470,6 +495,8 @@
     const msg = JSON.parse(event.data);
     switch (msg.type) {
       case 'PLAYER_COUNT':   handlePlayerCount(msg);   break;
+      case 'ROUND_PREVIEW':  handleRoundPreview(msg);  break;
+      case 'COUNTDOWN':      handleCountdown(msg);     break;
       case 'ROUND_START':    handleRoundStart(msg);    break;
       case 'TICK':           handleTick(msg);          break;
       case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
@@ -504,31 +531,61 @@
 
   let returnToWaitingTimer = null;
 
-  function handleRoundStart(msg) {
+  // Pinta lo que ROUND_PREVIEW y ROUND_START comparten (categoría/silueta/
+  // palabra) y cambia de la pantalla de espera a la de juego.
+  function paintRound(msg) {
     clearTimeout(returnToWaitingTimer); // si "Nueva partida" se clickeó rápido, cancela el regreso automático
-    totalTime = msg.totalTime;
-    currentPhase = 'playing';
     document.getElementById('m-round').textContent = `Ronda ${msg.roundNumber} / ${msg.totalRounds}`;
     document.getElementById('m-cat').textContent   = msg.category;
     document.getElementById('m-svg').innerHTML     = msg.svg;
     renderHiddenWord(msg.hiddenWord, 'm-word');
-    updateTimer(msg.timeLeft, msg.totalTime);
     clearNotif();
-    setPhase('playing');
     document.getElementById('main-waiting').style.display = 'none';
     document.getElementById('main-game').style.display    = 'grid';
     document.getElementById('btn-start').disabled = true;
   }
 
+  // La ronda ya se conoce pero el timer real todavía no arranca: se muestra
+  // la cuenta regresiva "3, 2, 1, ¡YA!" que manda el servidor.
+  function handleRoundPreview(msg) {
+    paintRound(msg);
+    document.getElementById('countdown-overlay').classList.add('show');
+  }
+
+  // "3, 2, 1, ¡YA!" — la manda el servidor para que master y todos los
+  // celulares la vean sincronizada (Eje 1), no cada pantalla por su cuenta.
+  function handleCountdown(msg) {
+    const numEl   = document.getElementById('cd-num');
+    const labelEl = document.getElementById('cd-label');
+    const isGo    = msg.value <= 0;
+    numEl.textContent   = isGo ? '¡YA!' : msg.value;
+    labelEl.textContent = isGo ? '' : 'Prepárate...';
+    numEl.classList.remove('pulse');
+    void numEl.offsetWidth; // reflow para reiniciar la animación
+    numEl.classList.add('pulse');
+    AudioFX.countdownBeep(isGo);
+  }
+
+  function handleRoundStart(msg) {
+    totalTime = msg.totalTime;
+    currentPhase = 'playing';
+    paintRound(msg);
+    document.getElementById('countdown-overlay').classList.remove('show');
+    updateTimer(msg.timeLeft, msg.totalTime);
+    setPhase('playing');
+  }
+
   function handleTick(msg) {
     updateTimer(msg.timeLeft, totalTime);
     renderHiddenWord(msg.hiddenWord, 'm-word');
+    if (msg.timeLeft > 0 && msg.timeLeft <= 5) AudioFX.tick();
   }
 
   function handleCorrectAnswer(msg) {
     // Eje 2: mostrar posición lógica de llegada y timestamp Lamport (los puntos
     // se calculan por posición al cerrar la ronda).
     showNotif(`${msg.nick} acertó · #${msg.position}  [L=${msg.lamport}]`, 3500);
+    AudioFX.correct();
   }
 
   function handleRoundEnd(msg) {
@@ -545,6 +602,7 @@
       showNotif(orderText, 0);
     }
     setPhase('roundEnd');
+    AudioFX.roundEnd(msg.solvers.length > 0);
   }
 
   function handleRanking(msg) {
@@ -554,6 +612,7 @@
       setPhase('gameEnd');
       document.getElementById('btn-start').disabled = false;
       document.getElementById('btn-start').textContent = 'Nueva partida';
+      AudioFX.gameEnd();
       // v2.1: la partida que acaba de terminar ya se persistió en la DB del
       // coordinador (game_over corre síncrono ahí) -> refresca el histórico.
       send({ type: 'GET_HALL_OF_FAME' });

@@ -1,4 +1,6 @@
-export type GamePhase = 'waiting' | 'playing' | 'roundEnd' | 'gameEnd';
+// 'countdown': entre que se conoce la siguiente ronda y arranca el timer real
+// -> ventana de la cuenta regresiva "3, 2, 1, ¡YA!" (sincroniza al público).
+export type GamePhase = 'waiting' | 'countdown' | 'playing' | 'roundEnd' | 'gameEnd';
 
 export interface Player {
   id: string;
@@ -112,6 +114,14 @@ export type S2C =
   | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean }
   | { type: 'PLAYER_COUNT'; count: number }
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
+  // Se conoce la siguiente ronda (categoría/silueta/palabra) pero el timer real
+  // TODAVÍA no arrancó -> los clientes pintan la pantalla y esperan COUNTDOWN.
+  | { type: 'ROUND_PREVIEW'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string }
+  // "3, 2, 1, ¡YA!" — value 3→1 cuenta, 0 = arranca (mismo instante que ROUND_START).
+  // La emite el coordinador para TODOS al mismo tiempo (Eje 1): si cada celular
+  // la mostrara por su cuenta, el timer real ya estaría corriendo mientras el
+  // jugador todavía ve "3, 2, 1" y perdería segundos reales de la ronda.
+  | { type: 'COUNTDOWN'; value: number }
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
   | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number }

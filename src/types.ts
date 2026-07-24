@@ -1,6 +1,8 @@
+// 'voting': entre que el master pulsa "Iniciar partida" y se cierra la
+// votación de categoría entre los jugadores conectados.
 // 'countdown': entre que se conoce la siguiente ronda y arranca el timer real
 // -> ventana de la cuenta regresiva "3, 2, 1, ¡YA!" (sincroniza al público).
-export type GamePhase = 'waiting' | 'countdown' | 'playing' | 'roundEnd' | 'gameEnd';
+export type GamePhase = 'waiting' | 'voting' | 'countdown' | 'playing' | 'roundEnd' | 'gameEnd';
 
 export interface Player {
   id: string;
@@ -104,6 +106,10 @@ export interface GameSnapshot {
   round: RoundState | null;
   players: Player[];
   lamport: number;
+  // Votación de categoría (ver GamePhase 'voting'): playerId -> categoría elegida.
+  votes: Record<string, string>;
+  voteCategories: string[];
+  pendingTotalRounds: number;
 }
 
 // Mensajes servidor → cliente
@@ -114,6 +120,17 @@ export type S2C =
   | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean }
   | { type: 'PLAYER_COUNT'; count: number }
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
+  // Votación de categoría: el master pulsó "Iniciar partida" -> se abre una
+  // ventana de `durationSec` para que los jugadores elijan entre `categories`
+  // (las reales del banco, ver wordBank.getCategoryCounts).
+  | { type: 'VOTE_START'; categories: string[]; durationSec: number }
+  | { type: 'VOTE_COUNTDOWN'; secondsLeft: number }
+  // Conteo en vivo — se difunde cada vez que alguien vota o cambia su voto.
+  | { type: 'VOTE_TALLY'; tally: Record<string, number>; totalVotes: number }
+  // Se cerró la votación: `winner` es la categoría con más votos (empate se
+  // decide al azar; si nadie votó, al azar entre todas). Inmediatamente
+  // después llega el ROUND_PREVIEW de la primera ronda con esa categoría.
+  | { type: 'VOTE_RESULT'; winner: string }
   // Se conoce la siguiente ronda (categoría/silueta/palabra) pero el timer real
   // TODAVÍA no arrancó -> los clientes pintan la pantalla y esperan COUNTDOWN.
   | { type: 'ROUND_PREVIEW'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string }
@@ -157,6 +174,8 @@ export type N2N =
   | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; token: string | null; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }
+  // Votación de categoría: seguidor reenvía el voto de su jugador al coordinador
+  | { type: 'N_FORWARD_VOTE';  playerId: string; category: string; originNode: string; lamport: number }
   // v2: seguidor pide al coordinador el perfil de un jugador (solo el coord. tiene DB)
   | { type: 'N_FORWARD_PROFILE'; playerId: string; token: string; originNode: string; lamport: number }
   // v2.1: seguidor pide al coordinador el salón de la fama para su pantalla maestra
@@ -171,6 +190,7 @@ export type C2S =
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'START_GAME'; totalRounds?: number }
+  | { type: 'CAST_VOTE'; category: string }  // votación de categoría, uno por jugador (se puede cambiar)
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente
   | { type: 'GET_HALL_OF_FAME' }  // v2.1: el master pide el salón de la fama
   | { type: 'PING'; l?: number };  // Eje 4: latido del celular al servidor

@@ -105,6 +105,30 @@
     @keyframes cdPulse { 0% { transform: scale(0.5); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
     .countdown-overlay .cd-label { color: #9ca3af; font-size: 1.3rem; }
 
+    /* ── Votación de categoría (entre "Iniciar partida" y la primera ronda) ── */
+    #main-voting {
+      display: none; flex: 1; align-items: center; justify-content: center;
+      flex-direction: column; gap: 20px; padding: 24px;
+    }
+    .vote-title { font-size: 1.6rem; font-weight: 800; }
+    .vote-sub   { color: #9ca3af; }
+    .vote-options { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 640px; }
+    .vote-option {
+      position: relative; padding: 18px 22px; border-radius: 14px;
+      background: #1a1a2e; border: 2px solid #2a2a4a;
+      font-size: 1.2rem; font-weight: 700; overflow: hidden;
+    }
+    .vote-option .bar {
+      position: absolute; inset: 0; z-index: 0;
+      background: linear-gradient(90deg, rgba(124,58,237,0.4), rgba(6,182,212,0.4));
+      width: 0%; transition: width 0.35s ease;
+    }
+    .vote-option .label, .vote-option .count { position: relative; z-index: 1; }
+    .vote-option .count { float: right; color: #06b6d4; }
+    .vote-timer-num { font-size: 3rem; font-weight: 900; color: #06b6d4; font-variant-numeric: tabular-nums; }
+    .vote-total { color: #6b7280; }
+    .vote-winner { color: #fbbf24; font-size: 1.6rem; font-weight: 800; min-height: 2rem; }
+
     /* ── Main layout ── */
     main {
       flex: 1; display: grid;
@@ -304,6 +328,16 @@
   </div>
 </main>
 
+<!-- Votación de categoría: entre "Iniciar partida" y la primera ronda -->
+<main id="main-voting">
+  <div class="vote-title">SILUNET</div>
+  <p class="vote-sub">Los jugadores están votando la categoría en sus celulares...</p>
+  <div class="vote-options" id="mv-options"></div>
+  <p class="vote-total" id="mv-total">0 votos</p>
+  <div class="vote-timer-num" id="mv-timer">8</div>
+  <p class="vote-winner" id="mv-winner"></p>
+</main>
+
 <main id="main-game" style="display:none;">
   <!-- Panel izquierdo: juego -->
   <div class="game-panel">
@@ -495,6 +529,10 @@
     const msg = JSON.parse(event.data);
     switch (msg.type) {
       case 'PLAYER_COUNT':   handlePlayerCount(msg);   break;
+      case 'VOTE_START':     handleVoteStart(msg);     break;
+      case 'VOTE_COUNTDOWN': handleVoteCountdown(msg); break;
+      case 'VOTE_TALLY':     handleVoteTally(msg);     break;
+      case 'VOTE_RESULT':    handleVoteResult(msg);    break;
       case 'ROUND_PREVIEW':  handleRoundPreview(msg);  break;
       case 'COUNTDOWN':      handleCountdown(msg);     break;
       case 'ROUND_START':    handleRoundStart(msg);    break;
@@ -531,8 +569,48 @@
 
   let returnToWaitingTimer = null;
 
+  // ── Votación de categoría ─────────────────────────────────────────────────
+  function handleVoteStart(msg) {
+    document.getElementById('mv-winner').textContent = '';
+    document.getElementById('mv-total').textContent  = '0 votos';
+    document.getElementById('mv-options').innerHTML = msg.categories.map(cat => `
+      <div class="vote-option" id="mvopt-${cssId(cat)}">
+        <span class="bar" id="mvbar-${cssId(cat)}" style="width:0%"></span>
+        <span class="label">${cat}</span>
+        <span class="count" id="mvcount-${cssId(cat)}">0</span>
+      </div>`).join('');
+    document.getElementById('main-waiting').style.display = 'none';
+    document.getElementById('main-game').style.display    = 'none';
+    document.getElementById('main-voting').style.display  = 'flex';
+    document.getElementById('btn-start').disabled = true;
+  }
+
+  function handleVoteCountdown(msg) {
+    document.getElementById('mv-timer').textContent = msg.secondsLeft;
+    if (msg.secondsLeft > 0 && msg.secondsLeft <= 5) AudioFX.tick();
+  }
+
+  function handleVoteTally(msg) {
+    const total = Math.max(1, msg.totalVotes);
+    for (const [cat, count] of Object.entries(msg.tally)) {
+      const bar = document.getElementById(`mvbar-${cssId(cat)}`);
+      const num = document.getElementById(`mvcount-${cssId(cat)}`);
+      if (bar) bar.style.width = Math.round((count / total) * 100) + '%';
+      if (num) num.textContent = count;
+    }
+    document.getElementById('mv-total').textContent = msg.totalVotes + (msg.totalVotes === 1 ? ' voto' : ' votos');
+  }
+
+  function handleVoteResult(msg) {
+    document.getElementById('mv-winner').textContent = `🎉 ¡Ganó ${msg.winner}!`;
+    AudioFX.correct();
+  }
+
+  // Los nombres de categoría pueden traer espacios/acentos -> los baja a un id de CSS válido.
+  function cssId(text) { return text.normalize('NFD').replace(/[^\w]/g, ''); }
+
   // Pinta lo que ROUND_PREVIEW y ROUND_START comparten (categoría/silueta/
-  // palabra) y cambia de la pantalla de espera a la de juego.
+  // palabra) y cambia de la pantalla de espera/votación a la de juego.
   function paintRound(msg) {
     clearTimeout(returnToWaitingTimer); // si "Nueva partida" se clickeó rápido, cancela el regreso automático
     document.getElementById('m-round').textContent = `Ronda ${msg.roundNumber} / ${msg.totalRounds}`;
@@ -541,6 +619,7 @@
     renderHiddenWord(msg.hiddenWord, 'm-word');
     clearNotif();
     document.getElementById('main-waiting').style.display = 'none';
+    document.getElementById('main-voting').style.display  = 'none';
     document.getElementById('main-game').style.display    = 'grid';
     document.getElementById('btn-start').disabled = true;
   }

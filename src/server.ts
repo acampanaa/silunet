@@ -285,6 +285,12 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       game.startGame(msg.totalRounds ?? 10);
       break;
 
+    // Seguidor reenvía el voto de categoría de su jugador al coordinador
+    case 'N_FORWARD_VOTE':
+      if (!cluster.isCoordinator) return;
+      game.castVote(msg.playerId, msg.category);
+      break;
+
     // v2: seguidor pidió un perfil → el coordinador lo lee de su DB y lo devuelve
     case 'N_FORWARD_PROFILE': {
       if (!cluster.isCoordinator) return;
@@ -445,6 +451,24 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_START',
             totalRounds: msg.totalRounds ?? 10,
+            lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      // Votación de categoría: uno por jugador, se puede cambiar mientras dure
+      // la ventana. No necesita respuesta puntual, el conteo llega por broadcast.
+      case 'CAST_VOTE': {
+        if (!client.playerId || client.role !== 'player') return;
+        if (cluster.isCoordinator) {
+          game.castVote(client.playerId, msg.category ?? '');
+        } else {
+          cluster.sendToCoordinator({
+            type:       'N_FORWARD_VOTE',
+            playerId:   client.playerId,
+            category:   msg.category ?? '',
+            originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });
         }

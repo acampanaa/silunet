@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult } from './types';
-import { getRandomRounds } from './wordBank';
+import { getRandomRounds, getCategoryCounts } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
 
@@ -8,6 +8,7 @@ const TOTAL_TIME   = 24;  // segundos por ronda
 const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
 const GAP_BETWEEN  = 4;   // segundos entre rondas
 const COUNTDOWN_FROM = 3; // "3, 2, 1, ¡YA!" antes de que arranque el timer real
+const VOTE_SECONDS = 8;   // ventana para que los jugadores voten la categoría
 
 // Eje 2+3: el puntaje depende de la POSICIÓN LÓGICA de llegada (orden de Lamport
 // resuelto por el coordinador), NO del tiempo ni de la latencia de red del celular.
@@ -24,6 +25,13 @@ export class Game extends EventEmitter {
   private round?: RoundState;
   private timer?: ReturnType<typeof setInterval>;
   private countdownTimer?: ReturnType<typeof setTimeout>;
+
+  // Votación de categoría (fase 'voting'): un jugador puede cambiar su voto
+  // mientras dure la ventana, por eso es un mapa (no un contador directo).
+  private votes = new Map<string, string>(); // playerId -> categoría
+  private voteCategories: string[] = [];
+  private voteTimer?: ReturnType<typeof setTimeout>;
+  private pendingTotalRounds = 10;
 
   // Eje 2: reloj de Lamport del nodo
   readonly clock = new LamportClock();
@@ -83,6 +91,9 @@ export class Game extends EventEmitter {
       round:             this.round ?? null,
       players:           [...this.players.values()].map(p => ({ ...p })),
       lamport:           this.clock.value,
+      votes:             Object.fromEntries(this.votes),
+      voteCategories:    this.voteCategories,
+      pendingTotalRounds: this.pendingTotalRounds,
     };
   }
 
@@ -98,6 +109,9 @@ export class Game extends EventEmitter {
     this.round             = s.round ?? undefined;
     this.players           = new Map(s.players.map(p => [p.id, { ...p }]));
     this.clock.merge(s.lamport);
+    this.votes             = new Map(Object.entries(s.votes ?? {}));
+    this.voteCategories    = s.voteCategories ?? [];
+    this.pendingTotalRounds = s.pendingTotalRounds ?? 10;
   }
 
   /**
@@ -108,6 +122,7 @@ export class Game extends EventEmitter {
   resume(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.countdownTimer) clearTimeout(this.countdownTimer);
+    if (this.voteTimer) clearTimeout(this.voteTimer);
     if ((this.phase === 'playing' || this.phase === 'countdown') && this.round) {
       // Si la caída agarró a mitad de la cuenta regresiva, no la repite desde
       // el nuevo coordinador (ya es bastante desincronización con el propio
@@ -115,6 +130,11 @@ export class Game extends EventEmitter {
       this.startRoundTimer();
     } else if (this.phase === 'roundEnd') {
       setTimeout(() => this.nextRound(), GAP_BETWEEN * 1000);
+    } else if (this.phase === 'voting') {
+      // Igual que con la cuenta regresiva: no reinicia la ventana de votación
+      // desde cero (ya es bastante desincronización con el propio failover) ->
+      // cierra la votación ya mismo con lo que se alcanzó a replicar.
+      this.finishVote();
     }
   }
 
@@ -155,9 +175,10 @@ export class Game extends EventEmitter {
     return !!p && p.connected === false;
   }
 
-  /** ¿Hay una partida en curso donde el puntaje de alguien esté en juego? */
+  /** ¿Hay una partida en curso (o por arrancar) donde valga la pena proteger la sesión? */
   private isGameLive(): boolean {
-    return this.phase === 'countdown' || this.phase === 'playing' || this.phase === 'roundEnd';
+    return this.phase === 'voting' || this.phase === 'countdown'
+        || this.phase === 'playing' || this.phase === 'roundEnd';
   }
 
   /**
@@ -206,20 +227,72 @@ export class Game extends EventEmitter {
 
   // --- Control de partida ---
 
+  /**
+   * El master pulsó "Iniciar partida": NO arranca la partida todavía, abre
+   * una votación de categoría entre los jugadores conectados. beginRounds()
+   * (llamado al cerrar la votación) es quien de verdad arranca las rondas.
+   */
   startGame(totalRounds = 10): boolean {
     if (this.phase !== 'waiting' && this.phase !== 'gameEnd') return false;
     if (this.timer) clearInterval(this.timer);
+    if (this.countdownTimer) clearTimeout(this.countdownTimer);
 
+    this.pendingTotalRounds = totalRounds;
+    this.votes.clear();
+    this.voteCategories = getCategoryCounts().map(c => c.name);
+    this.phase = 'voting';
+
+    this.broadcast({ type: 'VOTE_START', categories: this.voteCategories, durationSec: VOTE_SECONDS });
+    this.runVoteCountdown(VOTE_SECONDS);
+    return true;
+  }
+
+  /** Un jugador vota (o cambia su voto) mientras dura la ventana de votación. */
+  castVote(playerId: string, category: string): void {
+    if (this.phase !== 'voting' || !this.voteCategories.includes(category)) return;
+    this.votes.set(playerId, category);
+    this.broadcast({ type: 'VOTE_TALLY', tally: this.tally(), totalVotes: this.votes.size });
+  }
+
+  private tally(): Record<string, number> {
+    const t: Record<string, number> = {};
+    for (const c of this.voteCategories) t[c] = 0;
+    for (const c of this.votes.values()) t[c] = (t[c] ?? 0) + 1;
+    return t;
+  }
+
+  private runVoteCountdown(secondsLeft: number) {
+    this.broadcast({ type: 'VOTE_COUNTDOWN', secondsLeft });
+    if (secondsLeft > 0) {
+      this.voteTimer = setTimeout(() => this.runVoteCountdown(secondsLeft - 1), 1000);
+    } else {
+      this.finishVote();
+    }
+  }
+
+  /** Cierra la votación: la categoría con más votos gana (empate al azar entre
+   *  las empatadas; si nadie votó, al azar entre todas) y arranca la partida. */
+  private finishVote() {
+    if (this.voteCategories.length === 0) this.voteCategories = getCategoryCounts().map(c => c.name);
+    const t = this.tally();
+    const max = Math.max(0, ...Object.values(t));
+    const winners = max > 0 ? this.voteCategories.filter(c => t[c] === max) : this.voteCategories;
+    const winner = winners[Math.floor(Math.random() * winners.length)];
+
+    this.broadcast({ type: 'VOTE_RESULT', winner });
+    this.beginRounds(this.pendingTotalRounds, [winner]);
+  }
+
+  private beginRounds(totalRounds: number, categories: string[]) {
     // Purga a quien se quedó desconectado de la partida anterior sin volver:
     // una partida nueva es el corte natural de la ventana de reconexión.
     for (const [id, p] of [...this.players]) {
       if (p.connected === false) this.players.delete(id);
       else p.score = 0;
     }
-    this.rounds = getRandomRounds(Math.min(totalRounds, 12));
+    this.rounds = getRandomRounds(totalRounds, categories);
     this.currentRoundIndex = -1;
     this.nextRound();
-    return true;
   }
 
   private nextRound() {

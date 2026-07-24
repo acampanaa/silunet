@@ -87,7 +87,24 @@ export const WORD_BANK: WordEntry[] = [
   { word: 'TARJETA',   category: 'Almacenamiento',  svg: TARJETA   },
 ];
 
-export function getRandomRounds(count: number): WordEntry[] {
-  const shuffled = [...WORD_BANK].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, WORD_BANK.length));
+/** Categorías reales del banco con cuántas palabras tiene cada una, para que
+ *  el master pueda ofrecerlas como checkboxes sin inventar contenido nuevo. */
+export function getCategoryCounts(): Array<{ name: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const w of WORD_BANK) counts.set(w.category, (counts.get(w.category) ?? 0) + 1);
+  return [...counts.entries()].map(([name, count]) => ({ name, count }));
+}
+
+/**
+ * `categories`: si se pasa (no vacío), solo elige palabras de esas categorías.
+ * Si el filtro deja el banco vacío (p.ej. nombres que ya no existen), cae de
+ * vuelta al banco completo en vez de dejar una partida sin palabras.
+ */
+export function getRandomRounds(count: number, categories?: string[]): WordEntry[] {
+  const filtered = categories && categories.length > 0
+    ? WORD_BANK.filter(w => categories.includes(w.category))
+    : WORD_BANK;
+  const pool = filtered.length > 0 ? filtered : WORD_BANK;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, pool.length));
 }

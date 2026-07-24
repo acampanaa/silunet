@@ -74,6 +74,24 @@ export interface Perfil {
   recientes: PerfilReciente[];
 }
 
+// v2.1: "salón de la fama" — ranking acumulado de TODAS las partidas jugadas
+// (no solo la actual), calculado desde la misma DB del perfil individual.
+export interface HallOfFameEntry {
+  nick: string;
+  partidasJugadas: number;
+  puntosAcumulados: number;
+  oro: number;
+  plata: number;
+  bronce: number;
+}
+
+export interface RecentGame {
+  nombre: string;
+  jugadaEn: string;
+  totalRondas: number;
+  ganador: string | null;
+}
+
 // Snapshot completo del estado autoritativo del juego.
 // Viaja por el canal inter-nodo (N_REPLICATE) para que cada seguidor mantenga
 // una réplica pasiva y pueda continuar la partida si es promovido a coordinador.
@@ -103,8 +121,18 @@ export type S2C =
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
   // v2: perfil persistente solicitado por el celular (null si el token no existe)
   | { type: 'PROFILE'; profile: Perfil | null }
-  // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling)
-  | { type: 'CLUSTER_STATE'; nodes: Array<{ id: string; up: boolean; isCoordinator: boolean }> }
+  // v2.1: salón de la fama solicitado por la pantalla maestra
+  | { type: 'HALL_OF_FAME'; top: HallOfFameEntry[]; recentGames: RecentGame[] }
+  // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling).
+  // electionInProgress: hay una elección Bully en curso ahora mismo.
+  | { type: 'CLUSTER_STATE'; nodes: Array<{ id: string; up: boolean; isCoordinator: boolean }>; electionInProgress: boolean }
+  // Eje 2 + Eje 3: pulso del "motor" distribuido para el panel didáctico de
+  // /master — reloj de Lamport del coordinador y tamaño de la cola del
+  // candado del marcador, en vivo.
+  | { type: 'ENGINE_STATE'; lamport: number; mutexWaiting: number }
+  // Eje 3: evento puntual de la cola del candado (para el log en vivo del
+  // panel didáctico) — se emite justo cuando un acierto tiene que esperar.
+  | { type: 'MUTEX_QUEUED'; waiting: number }
   | { type: 'ERROR'; message: string };
 
 // Mensajes nodo → nodo (inter-cluster)
@@ -121,6 +149,8 @@ export type N2N =
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }
   // v2: seguidor pide al coordinador el perfil de un jugador (solo el coord. tiene DB)
   | { type: 'N_FORWARD_PROFILE'; playerId: string; token: string; originNode: string; lamport: number }
+  // v2.1: seguidor pide al coordinador el salón de la fama para su pantalla maestra
+  | { type: 'N_FORWARD_HALL_OF_FAME'; requesterId: string; originNode: string; lamport: number }
   | { type: 'N_PLAYER_LEFT';   playerId: string; lamport: number }
   | { type: 'N_BROADCAST';     payload: S2C; lamport: number }
   | { type: 'N_SEND_TO';       playerId: string; payload: S2C; lamport: number };
@@ -132,4 +162,5 @@ export type C2S =
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'START_GAME'; totalRounds?: number }
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente
+  | { type: 'GET_HALL_OF_FAME' }  // v2.1: el master pide el salón de la fama
   | { type: 'PING'; l?: number };  // Eje 4: latido del celular al servidor

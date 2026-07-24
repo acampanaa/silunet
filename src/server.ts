@@ -119,6 +119,13 @@ interface ClientMeta {
 
 const clients = new Map<WebSocket, ClientMeta>();
 
+// Id de conexión único por cliente (jugador o master) — incluye NODE_ID para
+// evitar colisiones entre nodos; se usa para enrutar respuestas puntuales
+// (N_SEND_TO) de vuelta a la conexión exacta que las pidió.
+function genConnId(): string {
+  return `${NODE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+}
+
 function send(ws: WebSocket, msg: S2C) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -142,7 +149,8 @@ function sendToLocalPlayer(playerId: string, msg: S2C): boolean {
 
 // Eje 4: empuja la salud del clúster a las pantallas maestras locales (sin polling).
 function sendClusterState() {
-  const msg: S2C = { type: 'CLUSTER_STATE', nodes: cluster.clusterState().nodes };
+  const { nodes, electionInProgress } = cluster.clusterState();
+  const msg: S2C = { type: 'CLUSTER_STATE', nodes, electionInProgress };
   const data = JSON.stringify(msg);
   for (const [ws, meta] of clients) {
     if (meta.role === 'master' && ws.readyState === WebSocket.OPEN) ws.send(data);
@@ -289,6 +297,18 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       break;
     }
 
+    // v2.1: la pantalla maestra de un seguidor pidió el salón de la fama
+    case 'N_FORWARD_HALL_OF_FAME': {
+      if (!cluster.isCoordinator) return;
+      cluster.sendToPeer(msg.originNode, {
+        type:     'N_SEND_TO',
+        playerId: msg.requesterId,
+        payload:  { type: 'HALL_OF_FAME', top: store.getHallOfFame(10), recentGames: store.getRecentGames(6) },
+        lamport:  game.clock.tick(),
+      });
+      break;
+    }
+
     // Seguidor notifica que un jugador se desconectó
     case 'N_PLAYER_LEFT':
       if (!cluster.isCoordinator) return;
@@ -319,9 +339,20 @@ cluster.on('became_coordinator', () => {
 cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
 
 // Eje 4: cualquier cambio de topología o de coordinador se empuja al master.
+// election_started avisa el arranque de una elección Bully (panel didáctico);
+// coordinator_changed ya cubre el cierre (queda un coordinador nuevo).
 cluster.on('peer_connected',     () => sendClusterState());
 cluster.on('peer_disconnected',  () => sendClusterState());
+cluster.on('election_started',   () => sendClusterState());
 cluster.on('coordinator_changed', () => sendClusterState());
+
+// Eje 2 + Eje 3: pulso periódico del motor distribuido para el panel
+// didáctico de /master (reloj de Lamport + cola del candado). Solo lo emite
+// el coordinador, que es quien tiene el estado autoritativo.
+const ENGINE_STATE_INTERVAL_MS = 800;
+setInterval(() => {
+  if (cluster.isCoordinator) game.broadcastEngineState();
+}, ENGINE_STATE_INTERVAL_MS);
 
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 
@@ -350,8 +381,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         const nick = (msg.nick ?? '').trim().slice(0, 20);
         if (!nick) { send(ws, { type: 'ERROR', message: 'Nick inválido' }); return; }
 
-        // PlayerId incluye nodeId para evitar colisiones entre nodos
-        const playerId = `${NODE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const playerId = genConnId();
         const token    = msg.token ?? null; // v2: identidad persistente del celular
         client.playerId = playerId;
         client.role     = 'player';
@@ -376,7 +406,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case 'MASTER_JOIN': {
-        client.role = 'master';
+        client.role     = 'master';
+        client.playerId = genConnId(); // v2.1: para poder enrutarle el HALL_OF_FAME si es seguidor
         sendClusterState(); // Eje 4: salud del clúster al instante
         if (cluster.isCoordinator) {
           send(ws, { type: 'PLAYER_COUNT', count: game.getPlayerCount() });
@@ -439,12 +470,31 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         }
         break;
       }
+
+      // v2.1: la pantalla maestra pide el salón de la fama (histórico de TODAS
+      // las Casa Abierta jugadas). Misma mecánica que GET_PROFILE: lectura
+      // puntual, solo la DB del coordinador es la fuente de verdad.
+      case 'GET_HALL_OF_FAME': {
+        if (cluster.isCoordinator) {
+          send(ws, { type: 'HALL_OF_FAME', top: store.getHallOfFame(10), recentGames: store.getRecentGames(6) });
+        } else if (client.playerId) {
+          cluster.sendToCoordinator({
+            type:       'N_FORWARD_HALL_OF_FAME',
+            requesterId: client.playerId,
+            originNode: NODE_ID,
+            lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
     }
   });
 
   ws.on('close', () => {
     const client = clients.get(ws);
-    if (client?.playerId) {
+    // role==='player': masters también tienen playerId (v2.1, para enrutar
+    // HALL_OF_FAME) pero nunca se registraron en game.players -> nada que soltar.
+    if (client?.role === 'player' && client.playerId) {
       if (cluster.isCoordinator) {
         game.removePlayer(client.playerId);
       } else {

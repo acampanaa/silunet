@@ -13,12 +13,18 @@
  * Así, cuando dos aciertos concurrentes (p.ej. de jugadores en nodos distintos)
  * llegan al coordinador, sus actualizaciones del marcador no se entrelazan: se
  * procesan una a una, en orden, sin perder ni duplicar puntajes.
+ *
+ * Extiende EventEmitter solo para que el panel didáctico de /master pueda
+ * mostrar en vivo el momento exacto en que dos aciertos concurrentes chocan
+ * contra el candado — el resto de la clase no depende de esto en nada.
  */
-export class Mutex {
+import { EventEmitter } from 'events';
+
+export class Mutex extends EventEmitter {
   private locked = false;
   private queue: Array<() => void> = [];
 
-  constructor(private readonly name = 'recurso') {}
+  constructor(private readonly name = 'recurso') { super(); }
 
   private acquire(owner: string): Promise<void> {
     return new Promise(resolve => {
@@ -27,6 +33,7 @@ export class Mutex {
         resolve();
       } else {
         console.log(`[Eje 3] '${this.name}' ocupado -> '${owner}' encolado (FIFO, ${this.queue.length + 1} en espera)`);
+        this.emit('queued', this.queue.length + 1);
         this.queue.push(resolve);
       }
     });

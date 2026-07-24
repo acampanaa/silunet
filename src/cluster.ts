@@ -71,7 +71,7 @@ export class Cluster extends EventEmitter {
       up: up.has(id),
       isCoordinator: id === this.coordinatorId,
     }));
-    return { nodes };
+    return { nodes, electionInProgress: this.electionInProgress };
   }
 
   // ── Conexiones entrantes (llamado por server.ts cuando detecta x-silunet-peer) ──
@@ -171,6 +171,9 @@ export class Cluster extends EventEmitter {
     if (this.electionInProgress) return;
     this.electionInProgress = true;
     this.gotAlive = false;
+    // Panel didáctico de /master: avisa de inmediato que arrancó una elección,
+    // sin esperar a que termine (become_coordinator ya avisa el cierre).
+    this.emit('election_started');
 
     const higher = [...this.peers.keys()].filter(id => this.higher(id, this.nodeId));
     console.log(`[${this.nodeId}] Elección Bully: nodos mayores conectados = [${higher.join(', ')}]`);

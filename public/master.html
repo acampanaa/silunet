@@ -68,6 +68,25 @@
     }
     .reconnect-banner.show { transform: translateY(0); }
 
+    /* ── Panel didáctico: Eje 2 (Lamport) + Eje 3 (candado) + Eje 4 (Bully) ── */
+    .engine-strip {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 28px;
+      background: rgba(20,20,34,0.6); border-bottom: 1px solid #2a2a4a;
+      font-size: 0.78rem; color: #6b7280;
+    }
+    .engine-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px;
+      padding: 4px 12px; white-space: nowrap;
+    }
+    .engine-chip b { color: #06b6d4; font-variant-numeric: tabular-nums; }
+    .engine-chip.mutex.busy { border-color: #f59e0b; color: #f59e0b; }
+    .engine-chip.mutex.busy b { color: #f59e0b; }
+    .engine-chip.election { border-color: #fbbf24; color: #fbbf24; display: none; }
+    .engine-chip.election.show { display: flex; }
+    .engine-log { flex: 1; min-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
     /* ── Main layout ── */
     main {
       flex: 1; display: grid;
@@ -175,6 +194,24 @@
     .qr-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.08em; }
     .qr-url { font-size: 1rem; font-weight: 700; color: #06b6d4; letter-spacing: 0.02em; }
     .qr-hint { font-size: 0.8rem; color: #6b7280; }
+
+    /* ── v2.1: Salón de la fama (histórico acumulado, no solo esta partida) ── */
+    .hof-block {
+      display: flex; gap: 20px; margin-top: 4px;
+      background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 16px;
+      padding: 18px 24px; width: 640px;
+    }
+    .hof-col { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .hof-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; }
+    .hof-list { display: flex; flex-direction: column; gap: 6px; }
+    .hof-row {
+      display: flex; align-items: center; gap: 8px;
+      background: #0f0f1a; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem;
+    }
+    .hof-row .pos  { color: #6b7280; min-width: 20px; }
+    .hof-row .nick { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hof-row .pts  { color: #06b6d4; font-weight: 700; white-space: nowrap; }
+    .hof-empty { color: #6b7280; font-size: 0.8rem; }
   </style>
   <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
        internet, así que una dependencia externa aquí rompería el QR entero. -->
@@ -202,6 +239,15 @@
   </div>
 </header>
 
+<!-- Panel didáctico: para que se VEA el sistema distribuido funcionando, no
+     solo se confíe en que está ahí (Eje 2 + Eje 3 + Eje 4 en vivo). -->
+<div class="engine-strip" id="engine-strip">
+  <div class="engine-chip" title="Eje 2: reloj lógico de Lamport del coordinador">🕓 Lamport <b id="e-lamport">0</b></div>
+  <div class="engine-chip mutex" id="e-mutex-chip" title="Eje 3: candado FIFO del marcador compartido">🔒 Candado <b id="e-mutex">libre</b></div>
+  <div class="engine-chip election" id="e-election" title="Eje 4: algoritmo del Matón">🗳️ Eligiendo coordinador…</div>
+  <div class="engine-log" id="e-log">Eje 3: sin colisiones todavía en esta partida.</div>
+</div>
+
 <main id="main-waiting" style="display:flex; align-items:center; justify-content:center; grid-template-columns:1fr;">
   <div class="waiting-center">
     <div class="big-logo">SILUNET</div>
@@ -218,6 +264,18 @@
       </div>
     </div>
     <p style="color:#06b6d4; font-size:1.5rem; font-weight:700" id="m-count">0 jugadores</p>
+
+    <!-- v2.1: salón de la fama — histórico de TODAS las Casa Abierta jugadas -->
+    <div class="hof-block" id="hof-block" style="display:none;">
+      <div class="hof-col">
+        <p class="hof-title">🏆 Salón de la fama</p>
+        <div class="hof-list" id="hof-top"></div>
+      </div>
+      <div class="hof-col">
+        <p class="hof-title">🕹️ Últimas partidas</p>
+        <div class="hof-list" id="hof-recent"></div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -280,18 +338,84 @@
   loadJoinInfo();
 
   // Eje 4: el panel de salud del clúster se actualiza por WebSocket (push), no por polling.
-  function renderNodes(nodes) {
+  function renderNodes(nodes, electionInProgress) {
     const el = document.getElementById('node-status');
     if (!nodes || nodes.length === 0) {
       el.innerHTML = `<div class="node-dot"><span class="dot down"></span>sin clúster</div>`;
-      return;
+    } else {
+      el.innerHTML = nodes.map(n => {
+        const cls  = (n.isCoordinator ? ' coord' : '') + (n.up ? '' : ' offline');
+        const star = n.isCoordinator ? `<span class="star" title="Coordinador">★</span>` : '';
+        return `<div class="node-dot${cls}" title="${n.up ? 'Activo' : 'Caído'}">`
+             + `<span class="dot ${n.up ? 'ok' : 'down'}"></span>${star}${n.id}</div>`;
+      }).join('');
     }
-    el.innerHTML = nodes.map(n => {
-      const cls  = (n.isCoordinator ? ' coord' : '') + (n.up ? '' : ' offline');
-      const star = n.isCoordinator ? `<span class="star" title="Coordinador">★</span>` : '';
-      return `<div class="node-dot${cls}" title="${n.up ? 'Activo' : 'Caído'}">`
-           + `<span class="dot ${n.up ? 'ok' : 'down'}"></span>${star}${n.id}</div>`;
-    }).join('');
+    // Panel didáctico (Eje 4): "🗳️ Eligiendo coordinador..." mientras dura la
+    // elección Bully — normalmente es tan rápida que apenas se alcanza a ver.
+    document.getElementById('e-election').classList.toggle('show', !!electionInProgress);
+  }
+
+  // ── Panel didáctico: Eje 2 (Lamport) + Eje 3 (candado) ─────────────────────
+  const engineLog = [];
+  function pushEngineLog(text) {
+    engineLog.unshift(`[${new Date().toLocaleTimeString('es', { hour12: false })}] ${text}`);
+    engineLog.length = Math.min(engineLog.length, 4);
+    document.getElementById('e-log').textContent = engineLog.join('   ·   ');
+  }
+
+  let mutexBusyTimer = null;
+  function handleEngineState(msg) {
+    document.getElementById('e-lamport').textContent = msg.lamport;
+    const chip = document.getElementById('e-mutex-chip');
+    const label = document.getElementById('e-mutex');
+    if (msg.mutexWaiting > 0) {
+      chip.classList.add('busy');
+      label.textContent = `${msg.mutexWaiting} en cola`;
+    } else if (!mutexBusyTimer) {
+      chip.classList.remove('busy');
+      label.textContent = 'libre';
+    }
+  }
+
+  function handleMutexQueued(msg) {
+    pushEngineLog(`🔒 Eje 3: acierto encolado (${msg.waiting} en espera) — dos llegaron casi a la vez`);
+    // deja el chip en rojo un momento más para que se alcance a ver, aunque
+    // el candado ya se haya liberado por dentro (dura milisegundos).
+    const chip = document.getElementById('e-mutex-chip');
+    chip.classList.add('busy');
+    clearTimeout(mutexBusyTimer);
+    mutexBusyTimer = setTimeout(() => { chip.classList.remove('busy'); mutexBusyTimer = null; }, 1500);
+  }
+
+  // ── v2.1: Salón de la fama ───────────────────────────────────────────────────
+  function handleHallOfFame(msg) {
+    const block = document.getElementById('hof-block');
+    const top = msg.top || [];
+    const recent = msg.recentGames || [];
+    if (top.length === 0 && recent.length === 0) { block.style.display = 'none'; return; }
+    block.style.display = 'flex';
+
+    const medals = ['🥇', '🥈', '🥉'];
+    document.getElementById('hof-top').innerHTML = top.length
+      ? top.map((e, i) => `
+          <div class="hof-row">
+            <span class="pos">${medals[i] ?? '#' + (i + 1)}</span>
+            <span class="nick">${e.nick}</span>
+            <span class="pts">${e.puntosAcumulados} pts</span>
+          </div>`).join('')
+      : '<p class="hof-empty">Todavía no hay historial.</p>';
+
+    document.getElementById('hof-recent').innerHTML = recent.length
+      ? recent.map(g => {
+          const fecha = new Date(g.jugadaEn).toLocaleDateString('es', { day: '2-digit', month: 'short' });
+          const ganador = g.ganador ? `🏅 ${g.ganador}` : 'sin ganador';
+          return `
+          <div class="hof-row" style="flex-direction:column; align-items:flex-start; gap:2px;">
+            <span class="nick">${g.nombre}</span>
+            <span style="color:#6b7280; font-size:0.78rem;">${fecha} · ${ganador}</span>
+          </div>`;
+        }).join('')
+      : '<p class="hof-empty">Todavía no hay partidas jugadas.</p>';
   }
 
   let notifTimer  = null;
@@ -323,6 +447,7 @@
       hasConnectedOnce = true;
       hideReconnecting();
       send({ type: 'MASTER_JOIN' });
+      send({ type: 'GET_HALL_OF_FAME' }); // v2.1: salón de la fama al conectar
     };
 
     ws.onmessage = onSocketMessage;
@@ -350,8 +475,11 @@
       case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
       case 'ROUND_END':      handleRoundEnd(msg);      break;
       case 'RANKING':        handleRanking(msg);       break;
-      case 'CLUSTER_STATE':  renderNodes(msg.nodes);   break;
+      case 'CLUSTER_STATE':  renderNodes(msg.nodes, msg.electionInProgress); break;
       case 'PLAYER_LEFT':    showNotif(`🔌 ${msg.nick}: Desconectado`, 4000); break;
+      case 'ENGINE_STATE':   handleEngineState(msg);   break;
+      case 'MUTEX_QUEUED':   handleMutexQueued(msg);   break;
+      case 'HALL_OF_FAME':   handleHallOfFame(msg);    break;
     }
   }
 
@@ -374,7 +502,10 @@
     document.getElementById('btn-start').disabled = msg.count === 0;
   }
 
+  let returnToWaitingTimer = null;
+
   function handleRoundStart(msg) {
+    clearTimeout(returnToWaitingTimer); // si "Nueva partida" se clickeó rápido, cancela el regreso automático
     totalTime = msg.totalTime;
     currentPhase = 'playing';
     document.getElementById('m-round').textContent = `Ronda ${msg.roundNumber} / ${msg.totalRounds}`;
@@ -423,6 +554,18 @@
       setPhase('gameEnd');
       document.getElementById('btn-start').disabled = false;
       document.getElementById('btn-start').textContent = 'Nueva partida';
+      // v2.1: la partida que acaba de terminar ya se persistió en la DB del
+      // coordinador (game_over corre síncrono ahí) -> refresca el histórico.
+      send({ type: 'GET_HALL_OF_FAME' });
+      // Deja el podio final en pantalla un rato para que el público lo vea,
+      // y luego vuelve solo a la pantalla de espera (QR + salón de la fama)
+      // en vez de quedarse congelado en el "Terminado" hasta que alguien
+      // presione "Nueva partida" a mano.
+      clearTimeout(returnToWaitingTimer);
+      returnToWaitingTimer = setTimeout(() => {
+        document.getElementById('main-game').style.display    = 'none';
+        document.getElementById('main-waiting').style.display = 'flex';
+      }, 10000);
     }
   }
 

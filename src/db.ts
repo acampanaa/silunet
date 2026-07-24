@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Perfil, PerfilReciente } from './types';
+import { Perfil, PerfilReciente, HallOfFameEntry, RecentGame } from './types';
 
 // ── v2: Persistencia (identidad e historia del jugador) ──────────────────────
 //
@@ -169,6 +169,50 @@ export class Store {
       medallas: { oro: agg.oro, plata: agg.plata, bronce: agg.bronce },
       recientes,
     };
+  }
+
+  /**
+   * v2.1 — "Salón de la fama": ranking acumulado de TODAS las Casa Abierta
+   * jugadas hasta ahora (no solo la partida en curso). Reusa exactamente las
+   * mismas tablas del historial de perfil, solo que agregado por jugador en
+   * vez de filtrado por token.
+   */
+  getHallOfFame(limit = 10): HallOfFameEntry[] {
+    return this.db
+      .prepare(
+        `SELECT
+           j.nick                                                       AS nick,
+           COUNT(*)                                                     AS partidasJugadas,
+           COALESCE(SUM(pt.puntos), 0)                                  AS puntosAcumulados,
+           COALESCE(SUM(CASE WHEN pt.medalla = 'oro'    THEN 1 ELSE 0 END), 0) AS oro,
+           COALESCE(SUM(CASE WHEN pt.medalla = 'plata'  THEN 1 ELSE 0 END), 0) AS plata,
+           COALESCE(SUM(CASE WHEN pt.medalla = 'bronce' THEN 1 ELSE 0 END), 0) AS bronce
+         FROM participaciones pt
+         JOIN jugadores j ON j.id = pt.jugador_id
+         GROUP BY pt.jugador_id
+         ORDER BY puntosAcumulados DESC
+         LIMIT ?`,
+      )
+      .all(limit) as unknown as HallOfFameEntry[];
+  }
+
+  /** Últimas partidas jugadas (Casa Abierta #N), con quién ganó cada una. */
+  getRecentGames(limit = 6): RecentGame[] {
+    return this.db
+      .prepare(
+        `SELECT
+           pa.nombre                            AS nombre,
+           pa.jugada_en                         AS jugadaEn,
+           pa.total_rondas                      AS totalRondas,
+           (SELECT j.nick FROM participaciones pt
+              JOIN jugadores j ON j.id = pt.jugador_id
+              WHERE pt.partida_id = pa.id AND pt.puesto = 1
+              LIMIT 1)                          AS ganador
+         FROM partidas pa
+         ORDER BY pa.id DESC
+         LIMIT ?`,
+      )
+      .all(limit) as unknown as RecentGame[];
   }
 
   close(): void {

@@ -29,6 +29,15 @@ export class Game extends EventEmitter {
   // Eje 3: candado lógico que serializa el acceso al marcador compartido
   private readonly scoreboardLock = new Mutex('marcador');
 
+  constructor() {
+    super();
+    // Panel didáctico de /master (Eje 3): retransmite el momento exacto en
+    // que dos aciertos concurrentes chocan contra el candado.
+    this.scoreboardLock.on('queued', (waiting: number) => {
+      this.broadcast({ type: 'MUTEX_QUEUED', waiting });
+    });
+  }
+
   // --- Consultas de estado ---
 
   getPhase()       { return this.phase; }
@@ -41,6 +50,11 @@ export class Game extends EventEmitter {
     return [...this.players.values()]
       .sort((a, b) => b.score - a.score)
       .map(p => ({ nick: p.nick, score: p.score }));
+  }
+
+  /** Pulso del motor distribuido para el panel didáctico de /master (Eje 2 + Eje 3). */
+  broadcastEngineState(): void {
+    this.broadcast({ type: 'ENGINE_STATE', lamport: this.clock.value, mutexWaiting: this.scoreboardLock.waiting });
   }
 
   getCurrentRoundInfo() {

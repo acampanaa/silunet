@@ -57,6 +57,17 @@
     .node-dot.offline { opacity: 0.55; }
     .node-dot .star { font-size: 0.7rem; }
 
+    /* Eje 4: aviso de reconexión (se cayó el nodo al que estaba pegada esta
+       pantalla -> reintentando por el clúster, ver script al final). */
+    .reconnect-banner {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+      background: #78350f; color: #fef3c7;
+      font-size: 0.9rem; font-weight: 600; text-align: center;
+      padding: 10px 12px; transform: translateY(-100%);
+      transition: transform 0.2s ease;
+    }
+    .reconnect-banner.show { transform: translateY(0); }
+
     /* ── Main layout ── */
     main {
       flex: 1; display: grid;
@@ -171,6 +182,9 @@
 </head>
 <body>
 
+<!-- Eje 4: aviso de reconexión -->
+<div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión con el nodo, reconectando...</div>
+
 <header>
   <div class="brand">
     <div class="logo">SILUNET</div>
@@ -283,13 +297,51 @@
   let notifTimer  = null;
   let currentPhase = 'waiting';
 
-  const ws = new WebSocket('ws://' + location.host);
+  // ── WebSocket con reconexión automática al clúster (Eje 4) ────────────────────
+  // Misma lógica que /play: si el nodo al que está pegada ESTA pantalla (la que
+  // se proyecta en la feria) se cae, no puede quedarse congelada mostrando el
+  // último estado. window.SILUNET_NODES lo inyecta server.ts al servir /master.
+  let ws;
+  let reconnectTimer;
+  let reconnectAttempt = 0;
+  let nodeIdx = 0;
+  let hasConnectedOnce = false;
+  const nodeList = buildNodeList();
 
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'MASTER_JOIN' }));
-  };
+  function buildNodeList() {
+    const self = 'ws://' + location.host;
+    const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+    const others = (window.SILUNET_NODES || []).map(httpToWs).filter(u => u !== self);
+    return [self, ...others];
+  }
 
-  ws.onmessage = (event) => {
+  function connectWS() {
+    ws = new WebSocket(nodeList[nodeIdx]);
+
+    ws.onopen = () => {
+      reconnectAttempt = 0;
+      hasConnectedOnce = true;
+      hideReconnecting();
+      send({ type: 'MASTER_JOIN' });
+    };
+
+    ws.onmessage = onSocketMessage;
+
+    ws.onclose = () => {
+      showReconnecting();
+      reconnectAttempt++;
+      // Tras 2 intentos seguidos al mismo nodo, prueba el siguiente del clúster
+      // (puede ser el que acaba de caerse -> nunca va a volver a responder).
+      if (reconnectAttempt > 2 && nodeList.length > 1) {
+        nodeIdx = (nodeIdx + 1) % nodeList.length;
+        reconnectAttempt = 0;
+      }
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connectWS, 1200);
+    };
+  }
+
+  function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
     switch (msg.type) {
       case 'PLAYER_COUNT':   handlePlayerCount(msg);   break;
@@ -301,9 +353,20 @@
       case 'CLUSTER_STATE':  renderNodes(msg.nodes);   break;
       case 'PLAYER_LEFT':    showNotif(`🔌 ${msg.nick}: Desconectado`, 4000); break;
     }
-  };
+  }
 
-  function send(msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+  function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+  // El banner solo tiene sentido tras la primera conexión exitosa; el intento
+  // inicial ya se ve reflejado en el indicador "conectando…" del header.
+  function showReconnecting() {
+    if (hasConnectedOnce) document.getElementById('reconnect-banner').classList.add('show');
+  }
+  function hideReconnecting() {
+    document.getElementById('reconnect-banner').classList.remove('show');
+  }
+
+  connectWS();
 
   function handlePlayerCount(msg) {
     document.getElementById('m-count').textContent = msg.count + ' jugador' + (msg.count === 1 ? '' : 'es');

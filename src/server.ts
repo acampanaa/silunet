@@ -96,9 +96,11 @@ const httpServer = http.createServer((req, res) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext  = path.extname(filePath);
     let body: Buffer | string = data;
-    if (htmlFile === 'play.html') {
+    if (htmlFile === 'play.html' || htmlFile === 'master.html') {
       // Eje 4: la lista de nodos viaja embebida en el HTML (no por WS), para que
-      // ya esté disponible en el celular ANTES de que el nodo actual se caiga.
+      // ya esté disponible ANTES de que el nodo actual se caiga. También se usa
+      // en /master: si el nodo al que está pegado el proyector muere, la
+      // pantalla pública no puede quedarse congelada.
       const nodesScript = `<script>window.SILUNET_NODES = ${JSON.stringify(siblingNodeUrls())};</script>\n`;
       body = data.toString('utf8').replace('</head>', `${nodesScript}</head>`);
     }

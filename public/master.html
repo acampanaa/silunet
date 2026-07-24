@@ -165,7 +165,9 @@
     .qr-url { font-size: 1rem; font-weight: 700; color: #06b6d4; letter-spacing: 0.02em; }
     .qr-hint { font-size: 0.8rem; color: #6b7280; }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
+       internet, así que una dependencia externa aquí rompería el QR entero. -->
+  <script src="/vendor/qrcode.min.js"></script>
 </head>
 <body>
 

@@ -152,6 +152,31 @@ Con la partida en curso, cierra (`Ctrl + C`) la terminal del **coordinador**
 coordinador (algoritmo del Matón / Bully) sin que la partida se congele. El
 panel de salud del clúster en `/master` refleja el cambio en vivo.
 
+### Los 3 nodos en 3 laptops distintas (feria real)
+
+Los ejemplos de arriba (`localhost`) sirven para probar el clúster en **una
+sola máquina**. El día de la feria cada nodo corre en su propia laptop, todas
+conectadas al mismo router/AP propio (ver sección de despliegue). En ese caso
+`PEERS` debe llevar la **IP real de cada laptop en esa red**, no `localhost`:
+
+```powershell
+# Laptop 1 (IP 192.168.50.10) — nodo 1
+$env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.11:3002,ws://192.168.50.12:3003"; node dist/server.js
+
+# Laptop 2 (IP 192.168.50.11) — nodo 2
+$env:NODE_ID="node2"; $env:PORT="3002"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.12:3003"; node dist/server.js
+
+# Laptop 3 (IP 192.168.50.12) — nodo 3
+$env:NODE_ID="node3"; $env:PORT="3003"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.11:3002"; node dist/server.js
+```
+
+Averigua la IP de cada laptop en esa red (`ipconfig` en Windows, buscar el
+adaptador Wi-Fi) **antes** de arrancar los nodos, e idealmente resérvala como
+IP fija en el router (DHCP reservation) para que no cambie si el router
+reinicia. Si una laptop tiene Wi-Fi y Ethernet activos a la vez (por ejemplo,
+conectada por error también al cable del recinto), confirma que `PEERS` y la
+URL del QR apunten a la IP del router propio, no a la otra red.
+
 ---
 
 ## 7. Variables de entorno

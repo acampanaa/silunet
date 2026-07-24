@@ -5,7 +5,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "tsc && node dist/server.js"
+    "dev": "tsc && node dist/server.js",
+    "vv:concurrencia": "node vv/concurrencia-lamport.js",
+    "vv:caos": "node vv/caos-coordinador.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

@@ -8,6 +8,9 @@ export interface Player {
   id: string;
   nick: string;
   score: number;
+  // Índice del avatar elegido en /join (ver public/avatars.js). Es solo un
+  // número: viaja gratis dentro de RANKING, que se difunde constantemente.
+  avatarId?: number;
   // v2: identidad persistente del jugador (token guardado en su propio celular).
   // Viaja en el snapshot para que el coordinador electo sepa a quién persistir.
   token?: string;
@@ -21,10 +24,16 @@ export interface Player {
   originNode?: string;
 }
 
+// Nivel de una palabra. NO se anota a mano: se deriva del largo de la palabra
+// (ver wordBank.difficultyOf), así el banco no se puede desincronizar.
+export type Difficulty = 'facil' | 'intermedio' | 'dificil';
+
 export interface WordEntry {
   word: string;
   category: string;
   svg: string;
+  hint: string;
+  difficulty: Difficulty;
 }
 
 export interface RoundState {
@@ -37,11 +46,13 @@ export interface RoundState {
   // lamport: timestamp Lamport del acierto — define la POSICIÓN LÓGICA de llegada.
   // Los puntos NO se guardan aquí: se calculan al cerrar la ronda según esa posición y N.
   solvers: Array<{ id: string; lamport: number }>;
+  hintedPlayerIds: string[];
 }
 
 export interface RankEntry {
   nick: string;
   score: number;
+  avatarId?: number;
 }
 
 // v2: resultado final de una partida, emitido por Game como evento interno
@@ -70,6 +81,7 @@ export interface PerfilReciente {
 
 export interface Perfil {
   nick: string;
+  avatarId: number;
   creadoEn: string;
   partidasJugadas: number;
   partidasGanadas: number;
@@ -82,6 +94,7 @@ export interface Perfil {
 // (no solo la actual), calculado desde la misma DB del perfil individual.
 export interface HallOfFameEntry {
   nick: string;
+  avatarId: number;
   partidasJugadas: number;
   puntosAcumulados: number;
   oro: number;
@@ -108,6 +121,7 @@ export interface GameSnapshot {
   lamport: number;
   // Votación de categoría (ver GamePhase 'voting'): playerId -> categoría elegida.
   votes: Record<string, string>;
+  difficultyVotes: Record<string, string>;
   voteCategories: string[];
   pendingTotalRounds: number;
 }
@@ -117,20 +131,21 @@ export type S2C =
   // v2: token = identidad persistente (el celular lo guarda); returning = "ya jugaste antes"
   // score = puntaje autoritativo actual (para reconstruirlo tras una reconexión);
   // reconnected = true si esta identidad ya tenía puntaje en la partida en curso.
-  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean }
+  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean; avatarId: number }
   | { type: 'PLAYER_COUNT'; count: number }
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
-  // Votación de categoría: el master pulsó "Iniciar partida" -> se abre una
-  // ventana de `durationSec` para que los jugadores elijan entre `categories`
-  // (las reales del banco, ver wordBank.getCategoryCounts).
-  | { type: 'VOTE_START'; categories: string[]; durationSec: number }
+  // Votación: el master pulsó "Iniciar partida" -> se abre una ventana de
+  // `durationSec` donde cada jugador elige UNA categoría (las reales del
+  // banco) y UNA dificultad. Son dos votos independientes en la misma ventana.
+  | { type: 'VOTE_START'; categories: string[]; difficulties: string[]; difficultyLabels: Record<string, string>; durationSec: number }
   | { type: 'VOTE_COUNTDOWN'; secondsLeft: number }
   // Conteo en vivo — se difunde cada vez que alguien vota o cambia su voto.
-  | { type: 'VOTE_TALLY'; tally: Record<string, number>; totalVotes: number }
-  // Se cerró la votación: `winner` es la categoría con más votos (empate se
-  // decide al azar; si nadie votó, al azar entre todas). Inmediatamente
-  // después llega el ROUND_PREVIEW de la primera ronda con esa categoría.
-  | { type: 'VOTE_RESULT'; winner: string }
+  | { type: 'VOTE_TALLY'; tally: Record<string, number>; totalVotes: number;
+      difficultyTally: Record<string, number>; totalDifficultyVotes: number }
+  // Se cerró la votación: categoría y dificultad más votadas (empate se decide
+  // al azar; si nadie votó, al azar entre todas). Inmediatamente después llega
+  // el ROUND_PREVIEW de la primera ronda.
+  | { type: 'VOTE_RESULT'; winner: string; difficulty: string; difficultyLabel: string }
   // Se conoce la siguiente ronda (categoría/silueta/palabra) pero el timer real
   // TODAVÍA no arrancó -> los clientes pintan la pantalla y esperan COUNTDOWN.
   | { type: 'ROUND_PREVIEW'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string }
@@ -141,10 +156,11 @@ export type S2C =
   | { type: 'COUNTDOWN'; value: number }
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
-  | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number }
+  | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number; usedHint: boolean }
+  | { type: 'HINT_RESULT'; status: 'revealed' | 'locked' | 'unavailable'; hint?: string; secondsLeft?: number; penaltyPercent?: number; alreadyUsed?: boolean }
   | { type: 'WRONG_ANSWER' }
   | { type: 'ALREADY_SOLVED' }
-  | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; position: number; lamport: number }> }
+  | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; position: number; lamport: number; usedHint: boolean }> }
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
   // v2: perfil persistente solicitado por el celular (null si el token no existe)
   | { type: 'PROFILE'; profile: Perfil | null }
@@ -171,11 +187,14 @@ export type N2N =
   | { type: 'N_ELECTION';      nodeId: string; lamport: number }
   | { type: 'N_ALIVE';         nodeId: string; lamport: number }
   | { type: 'N_COORDINATOR';   nodeId: string; lamport: number }
-  | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; token: string | null; originNode: string; lamport: number }
+  | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; token: string | null; avatarId?: number; originNode: string; lamport: number }
+  // Cambio de avatar: el seguidor lo reenvía al coordinador (solo él tiene DB)
+  | { type: 'N_FORWARD_SET_AVATAR'; playerId: string; token: string; avatarId: number; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
+  | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }
   // Votación de categoría: seguidor reenvía el voto de su jugador al coordinador
-  | { type: 'N_FORWARD_VOTE';  playerId: string; category: string; originNode: string; lamport: number }
+  | { type: 'N_FORWARD_VOTE';  playerId: string; kind: 'category' | 'difficulty'; option: string; originNode: string; lamport: number }
   // v2: seguidor pide al coordinador el perfil de un jugador (solo el coord. tiene DB)
   | { type: 'N_FORWARD_PROFILE'; playerId: string; token: string; originNode: string; lamport: number }
   // v2.1: seguidor pide al coordinador el salón de la fama para su pantalla maestra
@@ -186,11 +205,14 @@ export type N2N =
 
 // Mensajes cliente → servidor
 export type C2S =
-  | { type: 'JOIN'; nick: string; token?: string | null }  // v2: token persistente opcional
+  | { type: 'JOIN'; nick: string; token?: string | null; avatarId?: number }  // v2: token persistente opcional
+  | { type: 'SET_AVATAR'; token: string; avatarId: number }  // cambiar avatar desde el perfil
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }
+  | { type: 'REQUEST_HINT' }
   | { type: 'START_GAME'; totalRounds?: number }
-  | { type: 'CAST_VOTE'; category: string }  // votación de categoría, uno por jugador (se puede cambiar)
+  // Voto de categoría o de dificultad — uno de cada por jugador, se puede cambiar
+  | { type: 'CAST_VOTE'; kind: 'category' | 'difficulty'; option: string }
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente
   | { type: 'GET_HALL_OF_FAME' }  // v2.1: el master pide el salón de la fama
   | { type: 'PING'; l?: number };  // Eje 4: latido del celular al servidor

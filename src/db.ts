@@ -20,7 +20,22 @@ import { Perfil, PerfilReciente, HallOfFameEntry, RecentGame } from './types';
 export interface JugadorIdentidad {
   token: string;
   nick: string;
+  avatarId: number;
   returning: boolean; // true = ya existía (token reconocido) → "¡Hola de nuevo!"
+}
+
+// Debe coincidir con la cantidad de avatares de public/avatars.js. Solo viaja
+// el índice por la red; el dibujo lo arma el cliente.
+export const AVATAR_COUNT = 12;
+
+/**
+ * Devuelve un índice de avatar válido, o `null` si no vino ninguno (para poder
+ * distinguir "no lo mandó" de "eligió el 0" y no pisar el que ya tenía).
+ */
+export function normalizeAvatarId(id: unknown): number | null {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n < 0 || n >= AVATAR_COUNT) return null;
+  return n;
 }
 
 export interface ResultadoParticipacion {
@@ -67,6 +82,18 @@ export class Store {
         UNIQUE (jugador_id, partida_id)
       );
     `);
+
+    // Avatar del jugador. Va como ALTER separado (y no dentro del CREATE de
+    // arriba) para que las DB creadas por v2 —que ya tienen jugadores sin esta
+    // columna— sigan abriendo sin borrarse.
+    this.addColumnIfMissing('jugadores', 'avatar_id', 'INTEGER NOT NULL DEFAULT 0');
+  }
+
+  /** SQLite no tiene "ADD COLUMN IF NOT EXISTS": hay que mirar el pragma. */
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (cols.some(c => c.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   /**
@@ -75,26 +102,64 @@ export class Store {
    * no se reconoce, crea un jugador nuevo y genera un token para que el celular
    * lo guarde en localStorage.
    */
-  findOrCreatePlayer(token: string | null, nick: string): JugadorIdentidad {
+  findOrCreatePlayer(token: string | null, nick: string, avatarId?: number): JugadorIdentidad {
     const cleanNick = nick.trim().slice(0, 20) || 'Anónimo';
+    // El avatar puede no venir (cliente viejo, o reconexión que no lo reenvía):
+    // en ese caso se conserva el que ya tenía guardado en vez de pisarlo con 0.
+    const cleanAvatar = normalizeAvatarId(avatarId);
 
     if (token) {
-      const row = this.db.prepare('SELECT id, nick FROM jugadores WHERE token = ?').get(token) as
-        | { id: number; nick: string }
+      const row = this.db.prepare('SELECT id, nick, avatar_id FROM jugadores WHERE token = ?').get(token) as
+        | { id: number; nick: string; avatar_id: number }
         | undefined;
       if (row) {
-        if (row.nick !== cleanNick) {
-          this.db.prepare('UPDATE jugadores SET nick = ? WHERE id = ?').run(cleanNick, row.id);
+        const nextAvatar = cleanAvatar ?? row.avatar_id;
+        if (row.nick !== cleanNick || nextAvatar !== row.avatar_id) {
+          this.db
+            .prepare('UPDATE jugadores SET nick = ?, avatar_id = ? WHERE id = ?')
+            .run(cleanNick, nextAvatar, row.id);
         }
-        return { token, nick: cleanNick, returning: true };
+        return { token, nick: cleanNick, avatarId: nextAvatar, returning: true };
       }
     }
 
     const newToken = randomUUID();
+    const newAvatar = cleanAvatar ?? 0;
     this.db
-      .prepare('INSERT INTO jugadores (token, nick, creado_en) VALUES (?, ?, ?)')
-      .run(newToken, cleanNick, new Date().toISOString());
-    return { token: newToken, nick: cleanNick, returning: false };
+      .prepare('INSERT INTO jugadores (token, nick, avatar_id, creado_en) VALUES (?, ?, ?, ?)')
+      .run(newToken, cleanNick, newAvatar, new Date().toISOString());
+    return { token: newToken, nick: cleanNick, avatarId: newAvatar, returning: false };
+  }
+
+  /** Cambia solo el avatar de una identidad ya existente. */
+  setAvatar(token: string, avatarId: number): number | null {
+    const clean = normalizeAvatarId(avatarId) ?? 0;
+    const info = this.db.prepare('UPDATE jugadores SET avatar_id = ? WHERE token = ?').run(clean, token);
+    return info.changes > 0 ? clean : null;
+  }
+
+  /**
+   * Refresca nick/avatar de una identidad ya conocida, sin crearla.
+   *
+   * Hace falta en la RECONEXIÓN EN VIVO (ver resolveJoin): ese camino retoma al
+   * jugador desde memoria y no pasa por findOrCreatePlayer, así que sin esto un
+   * cambio de avatar hecho al reconectarse se veía en el ranking pero nunca
+   * llegaba a la DB — y el perfil seguía mostrando el anterior.
+   *
+   * Si el token no existe en la DB de ESTE nodo (caso failover: cada nodo tiene
+   * su propio archivo SQLite), no hace nada. Es lo correcto: no queremos
+   * inventar una identidad a medias en un nodo que nunca vio a este jugador.
+   */
+  updateIdentity(token: string, nick: string, avatarId?: number): void {
+    const cleanNick   = nick.trim().slice(0, 20) || 'Anónimo';
+    const cleanAvatar = normalizeAvatarId(avatarId);
+    if (cleanAvatar === null) {
+      this.db.prepare('UPDATE jugadores SET nick = ? WHERE token = ?').run(cleanNick, token);
+    } else {
+      this.db
+        .prepare('UPDATE jugadores SET nick = ?, avatar_id = ? WHERE token = ?')
+        .run(cleanNick, cleanAvatar, token);
+    }
   }
 
   /** Cuántas partidas se han guardado (para numerar la siguiente). */
@@ -129,8 +194,8 @@ export class Store {
   /** Perfil agregado de un jugador. Las stats se CALCULAN, no se almacenan. */
   getProfile(token: string): Perfil | null {
     const jugador = this.db
-      .prepare('SELECT id, nick, creado_en FROM jugadores WHERE token = ?')
-      .get(token) as { id: number; nick: string; creado_en: string } | undefined;
+      .prepare('SELECT id, nick, avatar_id, creado_en FROM jugadores WHERE token = ?')
+      .get(token) as { id: number; nick: string; avatar_id: number; creado_en: string } | undefined;
     if (!jugador) return null;
 
     const agg = this.db
@@ -162,6 +227,7 @@ export class Store {
 
     return {
       nick: jugador.nick,
+      avatarId: jugador.avatar_id,
       creadoEn: jugador.creado_en,
       partidasJugadas: agg.jugadas,
       partidasGanadas: agg.ganadas,
@@ -182,6 +248,7 @@ export class Store {
       .prepare(
         `SELECT
            j.nick                                                       AS nick,
+           j.avatar_id                                                  AS avatarId,
            COUNT(*)                                                     AS partidasJugadas,
            COALESCE(SUM(pt.puntos), 0)                                  AS puntosAcumulados,
            COALESCE(SUM(CASE WHEN pt.medalla = 'oro'    THEN 1 ELSE 0 END), 0) AS oro,

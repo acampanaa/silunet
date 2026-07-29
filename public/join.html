@@ -4,100 +4,221 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Silunet — Únete</title>
+  <link rel="icon" type="image/png" href="/assets/silunet-mark.png">
   <style>
+    @font-face {
+      font-family: 'Sora';
+      src: url('/fonts/Sora-Variable.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --surface-strong: #1f1e2a;
+      --border: #2a2a4a;
+      --primary: #F0439B;
+      --primary-soft: #ff6fb1;
+      --secondary: #22D3EE;
+      --tertiary: #A3E635;
+      --error: #ef4444;
+      --text: #e3e0f1;
+      --text-dim: #9ca3af;
+      --text-faint: #6b7280;
+      --font-display: 'Sora', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    }
+
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
       min-height: 100vh;
-      background: #0f0f1a;
+      background: var(--bg);
+      background-image:
+        radial-gradient(circle at 15% 15%, rgba(240, 67, 155, 0.14) 0%, transparent 45%),
+        radial-gradient(circle at 85% 85%, rgba(34, 211, 238, 0.12) 0%, transparent 45%),
+        radial-gradient(circle at 1px 1px, rgba(240, 67, 155, 0.08) 1px, transparent 0);
+      background-size: auto, auto, 28px 28px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: system-ui, -apple-system, sans-serif;
-      color: #f0f0f0;
+      font-family: var(--font-display);
+      color: var(--text);
       padding: 16px;
+      position: relative;
+      overflow: hidden;
     }
+
+    /* Línea de escaneo decorativa — refuerzo del carácter "tech" del tema */
+    .scanline {
+      position: fixed; left: 0; width: 100%; height: 2px;
+      background: linear-gradient(to right, transparent, rgba(34, 211, 238, 0.25), transparent);
+      animation: scan 5s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes scan { from { top: -5%; } to { top: 105%; } }
+
     .card {
-      background: #1a1a2e;
-      border: 1px solid #2a2a4a;
-      border-radius: 20px;
+      background: rgba(26, 26, 46, 0.78);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(240, 67, 155, 0.22);
+      border-radius: 24px;
       padding: 48px 36px;
       width: 100%;
       max-width: 380px;
       text-align: center;
+      position: relative;
+      z-index: 1;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     }
-    h1 {
-      font-size: 3rem;
-      font-weight: 900;
-      letter-spacing: -2px;
-      background: linear-gradient(135deg, #7c3aed, #06b6d4);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 6px;
+    .card::before, .card::after {
+      content: ''; position: absolute; width: 18px; height: 18px;
+    }
+    .card::before { top: -1px; left: -1px; border-top: 2px solid var(--primary); border-left: 2px solid var(--primary); border-radius: 24px 0 0 0; opacity: 0.7; }
+    .card::after  { bottom: -1px; right: -1px; border-bottom: 2px solid var(--secondary); border-right: 2px solid var(--secondary); border-radius: 0 0 24px 0; opacity: 0.7; }
+
+    .brand-lockup {
+      display: block;
+      width: min(100%, 300px);
+      height: auto;
+      margin: 0 auto 10px;
+      filter: drop-shadow(0 0 18px rgba(240, 67, 155, 0.28));
     }
     .subtitle {
-      color: #6b7280;
-      font-size: 0.9rem;
+      color: var(--secondary);
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
       margin-bottom: 40px;
     }
-    label {
-      display: block;
-      text-align: left;
-      font-size: 0.85rem;
-      color: #9ca3af;
+
+    .label-row {
+      display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 8px;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
     }
+    label {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    .live-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 6px var(--primary);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
     input {
       width: 100%;
       padding: 14px 18px;
-      background: #0f0f1a;
-      border: 2px solid #2a2a4a;
-      border-radius: 12px;
-      color: #f0f0f0;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      font-family: var(--font-display);
       font-size: 1.1rem;
       text-align: center;
       outline: none;
-      transition: border-color 0.2s;
-      margin-bottom: 16px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      margin-bottom: 20px;
     }
-    input:focus { border-color: #7c3aed; }
-    input::placeholder { color: #4b5563; }
+    input:focus {
+      border-color: var(--secondary);
+      box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.15);
+    }
+    input::placeholder { color: var(--text-faint); }
+
+    /* ── Galería de avatares ── */
+    .avatar-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
+      margin-bottom: 22px;
+    }
+    .avatar-opt {
+      width: 100%; aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer; padding: 0;
+      box-shadow: none;
+      transition: border-color 0.15s, transform 0.1s, background 0.15s;
+    }
+    .avatar-opt:hover  { border-color: var(--text-faint); filter: none; }
+    .avatar-opt:active { transform: scale(0.94); }
+    .avatar-opt.sel {
+      border-color: var(--primary);
+      background: rgba(240, 67, 155, 0.1);
+      box-shadow: 0 0 14px rgba(240, 67, 155, 0.3);
+    }
+    .avatar-opt svg { display: block; }
+
     button {
       width: 100%;
-      padding: 14px;
-      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      padding: 15px;
+      background: var(--primary);
       border: none;
-      border-radius: 12px;
+      border-radius: 14px;
       color: #fff;
+      font-family: var(--font-display);
       font-size: 1.1rem;
       font-weight: 700;
       cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
+      transition: filter 0.15s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 0 25px rgba(240, 67, 155, 0.4);
     }
-    button:hover  { opacity: 0.92; }
+    button:hover  { filter: brightness(1.1); }
     button:active { transform: scale(0.98); }
+
     .err {
-      color: #ef4444;
-      font-size: 0.875rem;
-      margin-top: 12px;
+      color: var(--error);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      margin-top: 14px;
       min-height: 20px;
     }
   </style>
 </head>
 <body>
+  <div class="scanline"></div>
   <div class="card">
-    <h1>SILUNET</h1>
+    <img class="brand-lockup" src="/assets/silunet-wordmark-compact.png" alt="SILUNET" width="1200" height="294" fetchpriority="high">
     <p class="subtitle">Adivina la silueta tecnológica</p>
-    <label for="nick">Tu apodo</label>
+    <div class="label-row">
+      <label for="nick">Tu apodo</label>
+      <span class="live-dot"></span>
+    </div>
     <input id="nick" type="text" placeholder="ej. TechMaster99"
            maxlength="20" autocomplete="off" autofocus>
+
+    <div class="label-row">
+      <label>Tu avatar</label>
+    </div>
+    <div class="avatar-grid" id="avatar-grid"></div>
+
     <button onclick="join()">Unirse a la partida</button>
     <p class="err" id="err"></p>
   </div>
 
+  <script src="/avatars.js"></script>
   <script>
     // v2: si este celular ya jugó antes, pre-llenar su apodo (identidad persistente)
     const savedNick = localStorage.getItem('silunet_nick');
@@ -106,6 +227,32 @@
       inp.value = savedNick;
       inp.select();
     }
+
+    // ── Galería de avatares ──────────────────────────────────────────────────
+    // El avatar elegido es parte de la identidad persistente: se recuerda en
+    // localStorage y se manda con el JOIN para que el servidor lo guarde.
+    // Si el celular ya jugó antes, arranca con el que tenía.
+    const { avatarSVG, avatarCount, normalizeAvatarId } = window.SilunetAvatars;
+
+    let selectedAvatar = normalizeAvatarId(localStorage.getItem('silunet_avatar'));
+
+    function renderAvatarGrid() {
+      const grid = document.getElementById('avatar-grid');
+      let html = '';
+      for (let i = 0; i < avatarCount(); i++) {
+        html += `<button type="button" class="avatar-opt${i === selectedAvatar ? ' sel' : ''}"
+                   data-id="${i}" aria-label="Avatar ${i + 1}"
+                   aria-pressed="${i === selectedAvatar}">${avatarSVG(i, '62%')}</button>`;
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll('.avatar-opt').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectedAvatar = Number(btn.dataset.id);
+          renderAvatarGrid();
+        });
+      });
+    }
+    renderAvatarGrid();
 
     document.getElementById('nick').addEventListener('keydown', e => {
       if (e.key === 'Enter') join();
@@ -118,6 +265,7 @@
         return;
       }
       sessionStorage.setItem('silunet_nick', nick);
+      localStorage.setItem('silunet_avatar', String(selectedAvatar));
       window.location.href = '/play';
     }
   </script>

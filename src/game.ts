@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
-import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult } from './types';
-import { getRandomRounds, getCategoryCounts } from './wordBank';
+import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty } from './types';
+import { getRandomRounds, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
 
@@ -16,6 +16,8 @@ const VOTE_SECONDS = 8;   // ventana para que los jugadores voten la categoría
 // con N = total de aciertos de la ronda. Primero (pos=1) → POINTS_TOP.
 const POINTS_TOP  = 1000; // puntos del primero en orden lógico
 const POINTS_BASE = 100;  // base garantizada (el último en orden lógico tiende a esto)
+const HINT_UNLOCK_AFTER = 5;
+const HINT_PENALTY_PERCENT = 20;
 
 export class Game extends EventEmitter {
   private players         = new Map<string, Player>();
@@ -28,7 +30,8 @@ export class Game extends EventEmitter {
 
   // Votación de categoría (fase 'voting'): un jugador puede cambiar su voto
   // mientras dure la ventana, por eso es un mapa (no un contador directo).
-  private votes = new Map<string, string>(); // playerId -> categoría
+  private votes = new Map<string, string>();           // playerId -> categoría
+  private difficultyVotes = new Map<string, string>(); // playerId -> dificultad
   private voteCategories: string[] = [];
   private voteTimer?: ReturnType<typeof setTimeout>;
   private pendingTotalRounds = 10;
@@ -59,7 +62,7 @@ export class Game extends EventEmitter {
   getRanking(): RankEntry[] {
     return [...this.players.values()]
       .sort((a, b) => b.score - a.score)
-      .map(p => ({ nick: p.nick, score: p.score }));
+      .map(p => ({ nick: p.nick, score: p.score, avatarId: p.avatarId ?? 0 }));
   }
 
   /** Pulso del motor distribuido para el panel didáctico de /master (Eje 2 + Eje 3). */
@@ -92,6 +95,7 @@ export class Game extends EventEmitter {
       players:           [...this.players.values()].map(p => ({ ...p })),
       lamport:           this.clock.value,
       votes:             Object.fromEntries(this.votes),
+      difficultyVotes:   Object.fromEntries(this.difficultyVotes),
       voteCategories:    this.voteCategories,
       pendingTotalRounds: this.pendingTotalRounds,
     };
@@ -106,10 +110,13 @@ export class Game extends EventEmitter {
     this.phase             = s.phase;
     this.rounds            = s.rounds;
     this.currentRoundIndex = s.currentRoundIndex;
-    this.round             = s.round ?? undefined;
+    this.round             = s.round
+      ? { ...s.round, hintedPlayerIds: s.round.hintedPlayerIds ?? [] }
+      : undefined;
     this.players           = new Map(s.players.map(p => [p.id, { ...p }]));
     this.clock.merge(s.lamport);
     this.votes             = new Map(Object.entries(s.votes ?? {}));
+    this.difficultyVotes   = new Map(Object.entries(s.difficultyVotes ?? {}));
     this.voteCategories    = s.voteCategories ?? [];
     this.pendingTotalRounds = s.pendingTotalRounds ?? 10;
   }
@@ -148,24 +155,43 @@ export class Game extends EventEmitter {
    * perder la señal, reconectar por cualquier nodo vivo del clúster con el
    * mismo token, y seguir jugando sin perder lo acumulado en esta partida.
    */
-  addPlayer(id: string, nick: string, token: string | undefined, originNode: string): Player {
+  addPlayer(id: string, nick: string, token: string | undefined, originNode: string, avatarId?: number): Player {
     if (token) {
       const existing = [...this.players.values()].find(p => p.token === token && p.connected === false);
       if (existing) {
-        this.players.delete(existing.id);
+        const previousId = existing.id;
+        this.players.delete(previousId);
         existing.id         = id;
         existing.nick        = nick;
         existing.connected  = true;
         existing.originNode = originNode;
+        if (avatarId != null) existing.avatarId = avatarId;
         this.players.set(id, existing);
+        if (this.round) {
+          this.round.hintedPlayerIds = this.round.hintedPlayerIds
+            .map(hintedId => hintedId === previousId ? id : hintedId);
+          this.round.solvers = this.round.solvers
+            .map(solver => solver.id === previousId ? { ...solver, id } : solver);
+        }
         this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
         return existing;
       }
     }
-    const player: Player = { id, nick, score: 0, token, connected: true, originNode };
+    const player: Player = { id, nick, score: 0, token, connected: true, originNode, avatarId: avatarId ?? 0 };
     this.players.set(id, player);
     this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
     return player;
+  }
+
+  /**
+   * Cambio de avatar en vivo. Refresca el ranking para que la pantalla maestra
+   * y los celulares lo vean al instante (solo viaja el índice, no una imagen).
+   */
+  setPlayerAvatar(playerId: string, avatarId: number): void {
+    const p = this.players.get(playerId);
+    if (!p || p.avatarId === avatarId) return;
+    p.avatarId = avatarId;
+    this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
   }
 
   /** ¿Este jugador tiene puntaje acumulado en la partida en curso y podría reconectar? */
@@ -229,8 +255,9 @@ export class Game extends EventEmitter {
 
   /**
    * El master pulsó "Iniciar partida": NO arranca la partida todavía, abre
-   * una votación de categoría entre los jugadores conectados. beginRounds()
-   * (llamado al cerrar la votación) es quien de verdad arranca las rondas.
+   * una votación entre los jugadores conectados — categoría Y dificultad, dos
+   * votos independientes en la misma ventana. beginRounds() (llamado al cerrar
+   * la votación) es quien de verdad arranca las rondas.
    */
   startGame(totalRounds = 10): boolean {
     if (this.phase !== 'waiting' && this.phase !== 'gameEnd') return false;
@@ -239,26 +266,58 @@ export class Game extends EventEmitter {
 
     this.pendingTotalRounds = totalRounds;
     this.votes.clear();
+    this.difficultyVotes.clear();
     this.voteCategories = getCategoryCounts().map(c => c.name);
     this.phase = 'voting';
 
-    this.broadcast({ type: 'VOTE_START', categories: this.voteCategories, durationSec: VOTE_SECONDS });
+    this.broadcast({
+      type:             'VOTE_START',
+      categories:       this.voteCategories,
+      difficulties:     DIFFICULTIES,
+      difficultyLabels: DIFFICULTY_LABEL,
+      durationSec:      VOTE_SECONDS,
+    });
     this.runVoteCountdown(VOTE_SECONDS);
     return true;
   }
 
   /** Un jugador vota (o cambia su voto) mientras dura la ventana de votación. */
-  castVote(playerId: string, category: string): void {
-    if (this.phase !== 'voting' || !this.voteCategories.includes(category)) return;
-    this.votes.set(playerId, category);
-    this.broadcast({ type: 'VOTE_TALLY', tally: this.tally(), totalVotes: this.votes.size });
+  castVote(playerId: string, kind: 'category' | 'difficulty', option: string): void {
+    if (this.phase !== 'voting') return;
+    if (kind === 'category') {
+      if (!this.voteCategories.includes(option)) return;
+      this.votes.set(playerId, option);
+    } else {
+      if (!DIFFICULTIES.includes(option as Difficulty)) return;
+      this.difficultyVotes.set(playerId, option);
+    }
+    this.broadcastTally();
   }
 
-  private tally(): Record<string, number> {
+  private broadcastTally() {
+    this.broadcast({
+      type:                 'VOTE_TALLY',
+      tally:                this.tally(this.voteCategories, this.votes),
+      totalVotes:           this.votes.size,
+      difficultyTally:      this.tally(DIFFICULTIES, this.difficultyVotes),
+      totalDifficultyVotes: this.difficultyVotes.size,
+    });
+  }
+
+  private tally(options: readonly string[], votes: Map<string, string>): Record<string, number> {
     const t: Record<string, number> = {};
-    for (const c of this.voteCategories) t[c] = 0;
-    for (const c of this.votes.values()) t[c] = (t[c] ?? 0) + 1;
+    for (const o of options) t[o] = 0;
+    for (const v of votes.values()) t[v] = (t[v] ?? 0) + 1;
     return t;
+  }
+
+  /** Opción más votada; empate se decide al azar entre las empatadas, y si
+   *  nadie votó, al azar entre todas — nunca se traba esperando votos. */
+  private pickWinner(options: readonly string[], votes: Map<string, string>): string {
+    const t = this.tally(options, votes);
+    const max = Math.max(0, ...Object.values(t));
+    const winners = max > 0 ? options.filter(o => t[o] === max) : options;
+    return winners[Math.floor(Math.random() * winners.length)];
   }
 
   private runVoteCountdown(secondsLeft: number) {
@@ -270,27 +329,29 @@ export class Game extends EventEmitter {
     }
   }
 
-  /** Cierra la votación: la categoría con más votos gana (empate al azar entre
-   *  las empatadas; si nadie votó, al azar entre todas) y arranca la partida. */
+  /** Cierra la votación y arranca la partida con lo que se haya votado. */
   private finishVote() {
     if (this.voteCategories.length === 0) this.voteCategories = getCategoryCounts().map(c => c.name);
-    const t = this.tally();
-    const max = Math.max(0, ...Object.values(t));
-    const winners = max > 0 ? this.voteCategories.filter(c => t[c] === max) : this.voteCategories;
-    const winner = winners[Math.floor(Math.random() * winners.length)];
+    const winner     = this.pickWinner(this.voteCategories, this.votes);
+    const difficulty = this.pickWinner(DIFFICULTIES, this.difficultyVotes) as Difficulty;
 
-    this.broadcast({ type: 'VOTE_RESULT', winner });
-    this.beginRounds(this.pendingTotalRounds, [winner]);
+    this.broadcast({
+      type: 'VOTE_RESULT',
+      winner,
+      difficulty,
+      difficultyLabel: DIFFICULTY_LABEL[difficulty],
+    });
+    this.beginRounds(this.pendingTotalRounds, [winner], difficulty);
   }
 
-  private beginRounds(totalRounds: number, categories: string[]) {
+  private beginRounds(totalRounds: number, categories: string[], difficulty: Difficulty) {
     // Purga a quien se quedó desconectado de la partida anterior sin volver:
     // una partida nueva es el corte natural de la ventana de reconexión.
     for (const [id, p] of [...this.players]) {
       if (p.connected === false) this.players.delete(id);
       else p.score = 0;
     }
-    this.rounds = getRandomRounds(totalRounds, categories);
+    this.rounds = getRandomRounds(totalRounds, categories, difficulty);
     this.currentRoundIndex = -1;
     this.nextRound();
   }
@@ -319,6 +380,7 @@ export class Game extends EventEmitter {
       timeLeft:      TOTAL_TIME,
       totalTime:     TOTAL_TIME,
       solvers:       [],
+      hintedPlayerIds: [],
     };
     this.phase = 'countdown';
 
@@ -389,7 +451,36 @@ export class Game extends EventEmitter {
     if (this.round.timeLeft <= 0) this.endRound();
   }
 
-  // --- Lógica de adivinanza ---
+  // --- Pistas y lógica de adivinanza ---
+
+  requestHint(id: string):
+    | { status: 'revealed'; hint: string; penaltyPercent: number; alreadyUsed: boolean }
+    | { status: 'locked'; secondsLeft: number }
+    | { status: 'unavailable' } {
+    if (!this.round || this.phase !== 'playing') return { status: 'unavailable' };
+    if (!this.players.has(id) || this.round.solvers.some(s => s.id === id)) {
+      return { status: 'unavailable' };
+    }
+
+    const elapsed = this.round.totalTime - this.round.timeLeft;
+    if (elapsed < HINT_UNLOCK_AFTER) {
+      return { status: 'locked', secondsLeft: HINT_UNLOCK_AFTER - elapsed };
+    }
+
+    const alreadyUsed = this.round.hintedPlayerIds.includes(id);
+    if (!alreadyUsed) {
+      this.round.hintedPlayerIds.push(id);
+      // La pista es privada, pero el uso se replica para conservar la
+      // penalización aunque cambie el coordinador durante la ronda.
+      this.emit('state_changed');
+    }
+    return {
+      status: 'revealed',
+      hint: this.round.wordEntry.hint,
+      penaltyPercent: HINT_PENALTY_PERCENT,
+      alreadyUsed,
+    };
+  }
 
   // Eje 2: clientLamport es el reloj del cliente al momento de enviar el GUESS.
   // update() sincroniza el reloj del nodo: t = max(local, clientLamport) + 1.
@@ -417,7 +508,14 @@ export class Game extends EventEmitter {
         const position = this.round.solvers.length;
 
         // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
-        this.broadcast({ type: 'CORRECT_ANSWER', nick: player.nick, playerId: player.id, position, lamport: eventLamport });
+        this.broadcast({
+          type: 'CORRECT_ANSWER',
+          nick: player.nick,
+          playerId: player.id,
+          position,
+          lamport: eventLamport,
+          usedHint: this.round.hintedPlayerIds.includes(id),
+        });
         return 'correct';
       }
       return 'wrong';
@@ -439,7 +537,11 @@ export class Game extends EventEmitter {
 
     const solvers = ordered.map((s, i) => {
       const position = i + 1;
-      const points = Math.round(POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (position - 1) / N));
+      const rawPoints = Math.round(POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (position - 1) / N));
+      const usedHint = this.round!.hintedPlayerIds.includes(s.id);
+      const points = usedHint
+        ? Math.round(rawPoints * (1 - HINT_PENALTY_PERCENT / 100))
+        : rawPoints;
       const player = this.players.get(s.id);
       if (player) player.score += points;
       return {
@@ -447,6 +549,7 @@ export class Game extends EventEmitter {
         points,
         position,
         lamport:  s.lamport,
+        usedHint,
       };
     });
 

@@ -1,4 +1,4 @@
-import { WordEntry } from './types';
+import { WordEntry, Difficulty } from './types';
 
 // Siluetas SVG — todas usan fill="currentColor" para poder cambiar color vía CSS
 
@@ -252,48 +252,293 @@ const CINTA = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
     M105,80 a18,18 0 1,0 0,36 a18,18 0 1,0 0,-36 Z"/>
 </svg>`;
 
-export const WORD_BANK: WordEntry[] = [
-  { word: 'MONITOR',    category: 'Computadores',   svg: MONITOR    },
-  { word: 'TECLADO',    category: 'Computadores',   svg: TECLADO    },
-  { word: 'RATON',      category: 'Computadores',   svg: RATON      },
-  { word: 'LAPTOP',     category: 'Computadores',   svg: LAPTOP     },
-  { word: 'IMPRESORA',  category: 'Computadores',   svg: IMPRESORA  },
-  { word: 'PROYECTOR',  category: 'Computadores',   svg: PROYECTOR  },
-  { word: 'PARLANTE',   category: 'Computadores',   svg: PARLANTE   },
-  { word: 'VENTILADOR', category: 'Computadores',   svg: VENTILADOR },
-  { word: 'CHIP',       category: 'Computadores',   svg: CHIP       },
-  { word: 'MEMORIA',    category: 'Computadores',   svg: MEMORIA    },
-  { word: 'JOYSTICK',   category: 'Computadores',   svg: JOYSTICK   },
+// Silueta pendiente de dibujar: recuadro punteado con un "?" dentro. Es a
+// propósito distinta de cualquier silueta real (nadie la va a confundir con
+// un objeto) para que se note de una cuál falta ilustrar.
+const PLACEHOLDER = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+  <rect x="22" y="22" width="116" height="116" rx="14" fill="none"
+        stroke="currentColor" stroke-width="5" stroke-dasharray="11 9" opacity="0.45"/>
+  <path d="M 60 62 a 20 20 0 1 1 20 26 v 8" fill="none"
+        stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="80" cy="112" r="7" fill="currentColor"/>
+</svg>`;
 
-  { word: 'ROUTER',    category: 'Redes',  svg: ROUTER      },
-  { word: 'SERVIDOR',  category: 'Redes',  svg: SERVIDOR    },
-  { word: 'NUBE',      category: 'Redes',  svg: NUBE        },
-  { word: 'MODEM',     category: 'Redes',  svg: MODEM       },
-  { word: 'ANTENA',    category: 'Redes',  svg: ANTENA      },
-  { word: 'SWITCH',    category: 'Redes',  svg: SWITCH_ICON },
-  { word: 'SATELITE',  category: 'Redes',  svg: SATELITE    },
-  { word: 'CABLE',     category: 'Redes',  svg: CABLE       },
-  { word: 'TORRE',     category: 'Redes',  svg: TORRE       },
-  { word: 'WIFI',      category: 'Redes',  svg: WIFI        },
+/**
+ * Siluetas ya dibujadas. Todo lo que NO esté aquí sale con PLACEHOLDER: para
+ * ilustrar una palabra nueva basta agregar su constante SVG arriba y sumarla
+ * a este mapa — no hay que tocar las listas de categorías de abajo.
+ */
+const ART: Record<string, string> = {
+  MONITOR, TECLADO, RATON, LAPTOP, IMPRESORA, PROYECTOR, PARLANTE, VENTILADOR,
+  CHIP, MEMORIA, JOYSTICK,
+  ROUTER, SERVIDOR, NUBE, MODEM, ANTENA, SWITCH: SWITCH_ICON, SATELITE, CABLE,
+  TORRE, WIFI,
+  TELEFONO, AUDIFONOS, CAMARA, RELOJ, CONTROL, DRON, MICROFONO, LENTES,
+  TERMOSTATO, TIMBRE,
+  DISCO, USB, TARJETA, DISCODURO, DISQUETE, CINTA,
+};
 
-  { word: 'TELEFONO',   category: 'Dispositivos',  svg: TELEFONO   },
-  { word: 'AUDIFONOS',  category: 'Dispositivos',  svg: AUDIFONOS  },
-  { word: 'CAMARA',     category: 'Dispositivos',  svg: CAMARA     },
-  { word: 'RELOJ',      category: 'Dispositivos',  svg: RELOJ      },
-  { word: 'CONTROL',    category: 'Dispositivos',  svg: CONTROL    },
-  { word: 'DRON',       category: 'Dispositivos',  svg: DRON       },
-  { word: 'MICROFONO',  category: 'Dispositivos',  svg: MICROFONO  },
-  { word: 'LENTES',     category: 'Dispositivos',  svg: LENTES     },
-  { word: 'TERMOSTATO', category: 'Dispositivos',  svg: TERMOSTATO },
-  { word: 'TIMBRE',     category: 'Dispositivos',  svg: TIMBRE     },
+/**
+ * Dificultad derivada del LARGO de la palabra (no anotada a mano): así el
+ * banco se mantiene solo — agregar una palabra nueva la clasifica sola, y no
+ * hay forma de que la etiqueta y la palabra se desincronicen.
+ */
+export function difficultyOf(word: string): Difficulty {
+  const n = word.replace(/ /g, '').length;
+  if (n <= 5) return 'facil';
+  if (n <= 8) return 'intermedio';
+  return 'dificil';
+}
 
-  { word: 'DISCO',      category: 'Almacenamiento',  svg: DISCO     },
-  { word: 'USB',        category: 'Almacenamiento',  svg: USB       },
-  { word: 'TARJETA',    category: 'Almacenamiento',  svg: TARJETA   },
-  { word: 'DISCODURO',  category: 'Almacenamiento',  svg: DISCODURO },
-  { word: 'DISQUETE',   category: 'Almacenamiento',  svg: DISQUETE  },
-  { word: 'CINTA',      category: 'Almacenamiento',  svg: CINTA     },
-];
+export const DIFFICULTIES: Difficulty[] = ['facil', 'intermedio', 'dificil'];
+
+/** Etiqueta legible para la pantalla de votación. */
+export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  facil:      'Fácil',
+  intermedio: 'Intermedio',
+  dificil:    'Difícil',
+};
+
+// Cada temática tiene 20 palabras, repartidas ~6 fáciles (≤5 letras),
+// ~8 intermedias (6-8) y ~6 difíciles (9+), para que cualquier combinación
+// de categoría + dificultad que salga votada tenga suficientes rondas.
+const CATEGORIES: Record<string, string[]> = {
+  'Computadores': [
+    'CHIP', 'RATON', 'PLACA', 'TECLA', 'BOTON', 'PIXEL',
+    'LAPTOP', 'WEBCAM', 'MONITOR', 'TECLADO', 'MEMORIA', 'PARLANTE', 'JOYSTICK', 'PANTALLA',
+    'IMPRESORA', 'PROYECTOR', 'MICROCHIP', 'ORDENADOR', 'VENTILADOR', 'PROCESADOR',
+  ],
+  'Redes': [
+    'NUBE', 'WIFI', 'MODEM', 'CABLE', 'TORRE', 'FIBRA',
+    'ROUTER', 'ANTENA', 'SWITCH', 'PAQUETE', 'SERVIDOR', 'SATELITE', 'FIREWALL', 'ETHERNET',
+    'PROTOCOLO', 'REPETIDOR', 'ENRUTADOR', 'NAVEGADOR', 'CONMUTADOR', 'CORTAFUEGOS',
+  ],
+  'Dispositivos': [
+    'DRON', 'FOCO', 'RELOJ', 'RADIO', 'MANDO', 'CASCO',
+    'CAMARA', 'LENTES', 'TIMBRE', 'ALARMA', 'SENSOR', 'CONTROL', 'TABLETA', 'TELEFONO',
+    'AUDIFONOS', 'MICROFONO', 'TELEVISOR', 'TERMOSTATO', 'SMARTWATCH', 'ASPIRADORA',
+  ],
+  'Almacenamiento': [
+    'USB', 'RAM', 'ROM', 'DISCO', 'CINTA', 'CACHE',
+    'BACKUP', 'SECTOR', 'TARJETA', 'ARCHIVO', 'CARPETA', 'VOLUMEN', 'DISQUETE', 'RESPALDO',
+    'DISCODURO', 'PARTICION', 'DIRECTORIO', 'ALMACENAJE', 'COMPRESION', 'REPOSITORIO',
+  ],
+  'Animales': [
+    'OSO', 'PEZ', 'GATO', 'PATO', 'LEON', 'PERRO',
+    'CONEJO', 'DELFIN', 'CABALLO', 'TORTUGA', 'GALLINA', 'ELEFANTE', 'CANGREJO', 'MARIPOSA',
+    'SERPIENTE', 'COCODRILO', 'MARIQUITA', 'MURCIELAGO', 'HIPOPOTAMO', 'RINOCERONTE',
+  ],
+  'Comida': [
+    'PAN', 'UVA', 'PERA', 'TACO', 'HUEVO', 'QUESO',
+    'BANANA', 'SANDIA', 'TOMATE', 'HELADO', 'MANZANA', 'NARANJA', 'PLATANO', 'GALLETA',
+    'CHOCOLATE', 'ZANAHORIA', 'MANDARINA', 'ESPAGUETI', 'PALOMITAS', 'HAMBURGUESA',
+  ],
+  'Transporte': [
+    'MOTO', 'TREN', 'BOTE', 'TAXI', 'BARCO', 'AVION',
+    'CAMION', 'LANCHA', 'COHETE', 'VELERO', 'TRACTOR', 'AUTOBUS', 'CARRETA', 'PATINETA',
+    'BICICLETA', 'SUBMARINO', 'CAMIONETA', 'AMBULANCIA', 'HELICOPTERO', 'MOTOCICLETA',
+  ],
+  'Instrumentos': [
+    'ARPA', 'GONG', 'LIRA', 'TUBA', 'PIANO', 'BANJO',
+    'FLAUTA', 'VIOLIN', 'TAMBOR', 'BATERIA', 'MARACAS', 'UKELELE', 'GUITARRA', 'TROMPETA',
+    'CLARINETE', 'PANDERETA', 'MANDOLINA', 'CONTRABAJO', 'VIOLONCHELO', 'SINTETIZADOR',
+  ],
+};
+
+// Pistas redactadas a mano: describen uso, contexto o una propiedad reconocible
+// sin incluir la respuesta ni una variante directa de ella.
+const HINTS: Record<string, string> = {
+  // Computadores
+  CHIP: 'Es una pieza diminuta que puede realizar millones de operaciones.',
+  RATON: 'Se desplaza sobre una superficie para controlar el puntero.',
+  PLACA: 'Sirve como base para conectar los componentes internos.',
+  TECLA: 'Cada una representa una entrada que se presiona con los dedos.',
+  BOTON: 'Activa una acción cuando se presiona.',
+  PIXEL: 'Es la unidad de color más pequeña que ves en una pantalla.',
+  LAPTOP: 'Combina pantalla y teclado en un equipo que se puede transportar.',
+  WEBCAM: 'Captura video para llamadas y transmisiones desde un equipo.',
+  MONITOR: 'Muestra de forma visual lo que procesa el equipo.',
+  TECLADO: 'Permite escribir mediante un conjunto ordenado de piezas.',
+  MEMORIA: 'Mantiene datos disponibles mientras se realizan tareas.',
+  PARLANTE: 'Convierte señales eléctricas en sonido audible.',
+  JOYSTICK: 'Se inclina en distintas direcciones para controlar movimientos.',
+  PANTALLA: 'Es la superficie donde aparecen imágenes, texto y video.',
+  IMPRESORA: 'Pasa información digital a una hoja física.',
+  PROYECTOR: 'Amplía una imagen y la lanza sobre una superficie.',
+  MICROCHIP: 'Concentra circuitos electrónicos en una pieza muy pequeña.',
+  ORDENADOR: 'Procesa instrucciones y datos para ejecutar programas.',
+  VENTILADOR: 'Mueve aire para evitar que los componentes se calienten.',
+  PROCESADOR: 'Ejecuta las instrucciones principales de un sistema.',
+
+  // Redes
+  NUBE: 'Permite usar recursos remotos a través de internet.',
+  WIFI: 'Conecta dispositivos sin necesidad de cables.',
+  MODEM: 'Adapta la señal del proveedor para dar acceso a internet.',
+  CABLE: 'Transporta señales mediante una conexión física.',
+  TORRE: 'Eleva equipos de comunicación para ampliar su alcance.',
+  FIBRA: 'Transporta información mediante pulsos de luz.',
+  ROUTER: 'Decide por dónde enviar los datos entre varias conexiones.',
+  ANTENA: 'Emite o recibe señales a través del aire.',
+  SWITCH: 'Une varios equipos dentro de una misma red local.',
+  PAQUETE: 'Es una pequeña porción de información enviada por la red.',
+  SERVIDOR: 'Ofrece recursos o servicios a otros equipos.',
+  SATELITE: 'Retransmite señales desde una órbita alrededor del planeta.',
+  FIREWALL: 'Filtra conexiones para bloquear tráfico no permitido.',
+  ETHERNET: 'Es una tecnología común para redes locales por conexión física.',
+  PROTOCOLO: 'Define las reglas que permiten comunicarse a dos sistemas.',
+  REPETIDOR: 'Recibe una señal debilitada y la vuelve a transmitir.',
+  ENRUTADOR: 'Selecciona el camino que seguirán los datos.',
+  NAVEGADOR: 'Interpreta sitios y permite recorrer contenido de internet.',
+  CONMUTADOR: 'Envía datos al puerto correcto dentro de una red local.',
+  CORTAFUEGOS: 'Actúa como una barrera que inspecciona el tráfico digital.',
+
+  // Dispositivos
+  DRON: 'Puede volar sin llevar un piloto en su interior.',
+  FOCO: 'Produce iluminación al recibir energía.',
+  RELOJ: 'Sirve para consultar y medir el paso del tiempo.',
+  RADIO: 'Recibe transmisiones de audio enviadas a distancia.',
+  MANDO: 'Permite controlar un aparato desde cierta distancia.',
+  CASCO: 'Se coloca sobre la cabeza como protección o accesorio tecnológico.',
+  CAMARA: 'Captura escenas y las convierte en imágenes.',
+  LENTES: 'Se colocan frente a los ojos para mejorar o ampliar la visión.',
+  TIMBRE: 'Emite un aviso cuando alguien lo acciona.',
+  ALARMA: 'Advierte de una situación mediante sonido o luz.',
+  SENSOR: 'Detecta cambios del entorno y los convierte en datos.',
+  CONTROL: 'Tiene botones para manejar otro equipo sin tocarlo directamente.',
+  TABLETA: 'Es una superficie táctil portátil mayor que un teléfono.',
+  TELEFONO: 'Permite comunicarse a distancia y cabe en una mano.',
+  AUDIFONOS: 'Llevan el sonido directamente a los oídos.',
+  MICROFONO: 'Convierte la voz y otros sonidos en una señal.',
+  TELEVISOR: 'Recibe y muestra contenido audiovisual.',
+  TERMOSTATO: 'Regula automáticamente la temperatura de un espacio.',
+  SMARTWATCH: 'Se lleva en la muñeca y ejecuta funciones digitales.',
+  ASPIRADORA: 'Retira polvo y residuos mediante succión.',
+
+  // Almacenamiento
+  USB: 'Es pequeño, portátil y se conecta directamente a un puerto.',
+  RAM: 'Guarda temporalmente lo que el sistema está usando ahora.',
+  ROM: 'Conserva instrucciones incluso cuando se corta la energía.',
+  DISCO: 'Guarda información sobre una superficie circular.',
+  CINTA: 'Almacena datos de forma secuencial en una banda magnética.',
+  CACHE: 'Conserva datos frecuentes para acceder a ellos más rápido.',
+  BACKUP: 'Es una copia preparada para recuperar información perdida.',
+  SECTOR: 'Es una división pequeña dentro de una unidad de datos.',
+  TARJETA: 'Es un soporte delgado y removible usado en cámaras y teléfonos.',
+  ARCHIVO: 'Agrupa información bajo un nombre dentro del sistema.',
+  CARPETA: 'Sirve para organizar varios elementos digitales.',
+  VOLUMEN: 'Es una unidad lógica que el sistema trata como espacio independiente.',
+  DISQUETE: 'Fue un soporte removible muy usado antes de las memorias modernas.',
+  RESPALDO: 'Permite restaurar datos después de una pérdida o daño.',
+  DISCODURO: 'Guarda grandes cantidades de datos de manera permanente.',
+  PARTICION: 'Divide una unidad física en espacios lógicos separados.',
+  DIRECTORIO: 'Organiza elementos mediante una estructura jerárquica.',
+  ALMACENAJE: 'Es la acción de conservar datos para utilizarlos después.',
+  COMPRESION: 'Reduce el espacio que ocupa la información.',
+  REPOSITORIO: 'Centraliza y conserva archivos o versiones de un proyecto.',
+
+  // Animales
+  OSO: 'Es un mamífero grande que puede pasar el invierno en una guarida.',
+  PEZ: 'Vive en el agua y respira mediante branquias.',
+  GATO: 'Es un felino doméstico conocido por su agilidad.',
+  PATO: 'Es un ave acuática con pico ancho y patas palmeadas.',
+  LEON: 'Es un gran felino cuyo macho suele tener melena.',
+  PERRO: 'Es un animal doméstico famoso por su lealtad.',
+  CONEJO: 'Tiene orejas largas y se desplaza dando saltos.',
+  DELFIN: 'Es un mamífero marino inteligente y sociable.',
+  CABALLO: 'Ha sido utilizado para montar y tirar de vehículos.',
+  TORTUGA: 'Lleva una cubierta rígida que protege su cuerpo.',
+  GALLINA: 'Es un ave de corral que pone huevos.',
+  ELEFANTE: 'Es un mamífero enorme con trompa y grandes orejas.',
+  CANGREJO: 'Tiene pinzas y suele desplazarse de lado.',
+  MARIPOSA: 'Cambia por metamorfosis y tiene alas coloridas.',
+  SERPIENTE: 'Se desplaza sin patas y posee un cuerpo alargado.',
+  COCODRILO: 'Es un gran reptil semiacuático con mandíbula poderosa.',
+  MARIQUITA: 'Es un insecto pequeño, redondo y normalmente tiene puntos.',
+  MURCIELAGO: 'Es el único mamífero capaz de vuelo sostenido.',
+  HIPOPOTAMO: 'Pasa gran parte del día en el agua pese a ser terrestre.',
+  RINOCERONTE: 'Es un mamífero robusto con uno o más cuernos en el hocico.',
+
+  // Comida
+  PAN: 'Se prepara horneando una masa hecha principalmente con harina.',
+  UVA: 'Es una fruta pequeña que crece agrupada en racimos.',
+  PERA: 'Es una fruta de base ancha y parte superior estrecha.',
+  TACO: 'Consiste en una tortilla doblada alrededor de un relleno.',
+  HUEVO: 'Tiene cáscara y se usa en innumerables preparaciones.',
+  QUESO: 'Se obtiene al transformar y madurar leche.',
+  BANANA: 'Es una fruta alargada con cáscara amarilla.',
+  SANDIA: 'Es grande, verde por fuera y muy jugosa por dentro.',
+  TOMATE: 'Es rojo al madurar y se usa mucho en salsas y ensaladas.',
+  HELADO: 'Es un postre frío de textura cremosa.',
+  MANZANA: 'Es una fruta redonda asociada con huertos de clima templado.',
+  NARANJA: 'Es un cítrico redondo de color intenso.',
+  PLATANO: 'Es una fruta curva que se pela antes de comer.',
+  GALLETA: 'Es una porción pequeña y horneada, normalmente crujiente.',
+  CHOCOLATE: 'Se elabora a partir de semillas de una planta tropical.',
+  ZANAHORIA: 'Es una raíz comestible, generalmente de color anaranjado.',
+  MANDARINA: 'Es un cítrico pequeño cuya cáscara se retira fácilmente.',
+  ESPAGUETI: 'Es una pasta larga y delgada que suele servirse con salsa.',
+  PALOMITAS: 'Se forman cuando ciertos granos revientan con el calor.',
+  HAMBURGUESA: 'Lleva un relleno redondo entre dos partes de un pan.',
+
+  // Transporte
+  MOTO: 'Tiene dos ruedas y un motor, pero no se pedalea.',
+  TREN: 'Circula sobre rieles y puede arrastrar varios vagones.',
+  BOTE: 'Es una embarcación pequeña para desplazarse sobre el agua.',
+  TAXI: 'Transporta pasajeros a cambio de una tarifa.',
+  BARCO: 'Es una embarcación capaz de recorrer mares o ríos.',
+  AVION: 'Tiene alas y transporta personas o carga por el aire.',
+  CAMION: 'Está diseñado principalmente para transportar carga pesada.',
+  LANCHA: 'Es una embarcación pequeña y rápida, normalmente con motor.',
+  COHETE: 'Se impulsa expulsando gases y puede viajar fuera de la atmósfera.',
+  VELERO: 'Aprovecha el viento para moverse sobre el agua.',
+  TRACTOR: 'Se utiliza en el campo para arrastrar maquinaria agrícola.',
+  AUTOBUS: 'Lleva numerosos pasajeros siguiendo una ruta.',
+  CARRETA: 'Es un vehículo sencillo que suele ser tirado por animales.',
+  PATINETA: 'Es una tabla con ruedas sobre la que se viaja de pie.',
+  BICICLETA: 'Tiene dos ruedas y avanza mediante pedales.',
+  SUBMARINO: 'Puede navegar durante largos periodos bajo el agua.',
+  CAMIONETA: 'Es un vehículo versátil con espacio para carga o pasajeros.',
+  AMBULANCIA: 'Transporta pacientes y cuenta con equipo de emergencia.',
+  HELICOPTERO: 'Sus aspas le permiten elevarse verticalmente y quedar suspendido.',
+  MOTOCICLETA: 'Es un vehículo motorizado de dos ruedas que se conduce sentado.',
+
+  // Instrumentos
+  ARPA: 'Sus numerosas cuerdas se pulsan dentro de un marco triangular.',
+  GONG: 'Es un gran disco metálico que se golpea y produce resonancia.',
+  LIRA: 'Tiene cuerdas sujetas a un marco abierto de origen antiguo.',
+  TUBA: 'Es un instrumento de viento metálico con sonido muy grave.',
+  PIANO: 'Sus teclas activan mecanismos que golpean cuerdas internas.',
+  BANJO: 'Tiene cuerdas y una caja circular cubierta por una membrana.',
+  FLAUTA: 'Produce sonido al soplar aire a través de un tubo.',
+  VIOLIN: 'Se apoya cerca del hombro y normalmente se toca con arco.',
+  TAMBOR: 'Su membrana produce sonido al ser golpeada.',
+  BATERIA: 'Agrupa varias piezas de percusión para tocarlas en conjunto.',
+  MARACAS: 'Se agitan con las manos para producir ritmo.',
+  UKELELE: 'Es pequeño, tiene cuatro cuerdas y origen hawaiano.',
+  GUITARRA: 'Normalmente tiene seis cuerdas y se toca con ambas manos.',
+  TROMPETA: 'Es de metal, se sopla y suele tener tres válvulas.',
+  CLARINETE: 'Es un tubo de viento con llaves y una lengüeta.',
+  PANDERETA: 'Combina una membrana circular con pequeñas piezas metálicas.',
+  MANDOLINA: 'Es de cuerdas, cuerpo pequeño y suele tocarse con púa.',
+  CONTRABAJO: 'Es el miembro más grande y grave de su familia de cuerdas.',
+  VIOLONCHELO: 'Se toca sentado, apoyado en el suelo y usando un arco.',
+  SINTETIZADOR: 'Genera sonidos electrónicos que pueden imitar otros instrumentos.',
+};
+
+const missingHints = Object.values(CATEGORIES).flat().filter(word => !HINTS[word]);
+if (missingHints.length > 0) {
+  throw new Error(`Faltan pistas para: ${missingHints.join(', ')}`);
+}
+
+export const WORD_BANK: WordEntry[] = Object.entries(CATEGORIES).flatMap(
+  ([category, words]) => words.map(word => ({
+    word,
+    category,
+    svg: ART[word] ?? PLACEHOLDER,
+    hint: HINTS[word],
+    difficulty: difficultyOf(word),
+  })),
+);
 
 /** Categorías reales del banco con cuántas palabras tiene cada una, para que
  *  el master pueda ofrecerlas como checkboxes sin inventar contenido nuevo. */
@@ -304,15 +549,27 @@ export function getCategoryCounts(): Array<{ name: string; count: number }> {
 }
 
 /**
- * `categories`: si se pasa (no vacío), solo elige palabras de esas categorías.
- * Si el filtro deja el banco vacío (p.ej. nombres que ya no existen), cae de
- * vuelta al banco completo en vez de dejar una partida sin palabras.
+ * `categories` / `difficulty`: si se pasan, acotan el banco a esa temática y
+ * ese nivel. Cada filtro cae de vuelta al conjunto anterior si dejaría el
+ * banco vacío, para que una combinación sin palabras nunca produzca una
+ * partida de cero rondas.
  */
-export function getRandomRounds(count: number, categories?: string[]): WordEntry[] {
-  const filtered = categories && categories.length > 0
-    ? WORD_BANK.filter(w => categories.includes(w.category))
-    : WORD_BANK;
-  const pool = filtered.length > 0 ? filtered : WORD_BANK;
+export function getRandomRounds(
+  count: number,
+  categories?: string[],
+  difficulty?: Difficulty,
+): WordEntry[] {
+  let pool = WORD_BANK;
+
+  if (categories && categories.length > 0) {
+    const byCategory = pool.filter(w => categories.includes(w.category));
+    if (byCategory.length > 0) pool = byCategory;
+  }
+  if (difficulty) {
+    const byDifficulty = pool.filter(w => w.difficulty === difficulty);
+    if (byDifficulty.length > 0) pool = byDifficulty;
+  }
+
   const shuffled = [...pool].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(count, pool.length));
 }

@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Game }          from './game';
 import { Cluster }       from './cluster';
-import { Store }         from './db';
+import { Store, normalizeAvatarId } from './db';
 import { S2C, C2S, N2N, GameOverResult } from './types';
 
 // ── Configuración por instancia ───────────────────────────────────────────────
@@ -32,6 +32,7 @@ const MIME: Record<string, string> = {
   '.css':  'text/css',
   '.svg':  'image/svg+xml',
   '.ico':  'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 
 function getLocalIP(): string {
@@ -178,6 +179,22 @@ game.on('broadcast', (msg: S2C) => {
   }
 });
 
+// Los cambios privados (como usar una pista) no se difunden a todos los
+// celulares, pero sí se replican para sobrevivir a un cambio de coordinador.
+game.on('state_changed', () => {
+  if (!cluster.isCoordinator) return;
+  cluster.broadcastToPeers({
+    type:     'N_REPLICATE',
+    snapshot: game.snapshot(),
+    lamport:  game.clock.tick(),
+  });
+});
+
+function hintPayload(playerId: string): S2C {
+  const result = game.requestHint(playerId);
+  return { type: 'HINT_RESULT', ...result };
+}
+
 // v2 + Eje 4: resuelve una identidad de JOIN en el coordinador.
 //
 // Primero intenta una RECONEXIÓN EN VIVO: si el token que trae el celular ya
@@ -188,14 +205,19 @@ game.on('broadcast', (msg: S2C) => {
 // ese token y le asignaría uno nuevo, perdiendo el puntaje acumulado de HOY. Solo
 // cuando no hay partida en curso con ese token se consulta/crea la identidad
 // persistente (historial entre partidas) en la DB local.
-function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string) {
+function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string, avatarId?: number) {
   if (token && game.wasConnected(token)) {
-    const player = game.addPlayer(playerId, nick, token, originNode);
-    return { player, token, returning: true, reconnected: true };
+    const player = game.addPlayer(playerId, nick, token, originNode, avatarId);
+    // La partida en vivo se retoma desde memoria (arriba), pero el nick/avatar
+    // que trae el celular sí hay que persistirlos: si no, el perfil seguiría
+    // mostrando los anteriores y no coincidiría con lo que se ve en el ranking.
+    // No-op si este nodo no conoce el token (failover).
+    store.updateIdentity(token, nick, avatarId);
+    return { player, token, returning: true, reconnected: true, avatarId: player.avatarId ?? 0 };
   }
-  const id     = store.findOrCreatePlayer(token, nick);
-  const player = game.addPlayer(playerId, id.nick, id.token, originNode);
-  return { player, token: id.token, returning: id.returning, reconnected: false };
+  const id     = store.findOrCreatePlayer(token, nick, avatarId);
+  const player = game.addPlayer(playerId, id.nick, id.token, originNode, id.avatarId);
+  return { player, token: id.token, returning: id.returning, reconnected: false, avatarId: id.avatarId };
 }
 
 // ── v2: persistencia al cerrar la partida (Paso 3) ───────────────────────────
@@ -242,12 +264,12 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía JOIN de un jugador al coordinador
     case 'N_FORWARD_JOIN': {
       if (!cluster.isCoordinator) return;
-      const { player, token: playerToken, returning, reconnected } = resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode);
+      const { player, token: playerToken, returning, reconnected, avatarId } = resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode, msg.avatarId);
       // WELCOME → solo al jugador que se unió, en su nodo de origen
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
-        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected },
+        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId },
         lamport:  game.clock.tick(),
       });
       // Si hay ronda en curso, sincronizar estado al nuevo jugador
@@ -279,16 +301,34 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       break;
     }
 
+    case 'N_FORWARD_HINT': {
+      if (!cluster.isCoordinator) return;
+      cluster.sendToPeer(msg.originNode, {
+        type:     'N_SEND_TO',
+        playerId: msg.playerId,
+        payload:  hintPayload(msg.playerId),
+        lamport:  game.clock.tick(),
+      });
+      break;
+    }
+
     // Seguidor reenvía START_GAME del master
     case 'N_FORWARD_START':
       if (!cluster.isCoordinator) return;
       game.startGame(msg.totalRounds ?? 10);
       break;
 
-    // Seguidor reenvía el voto de categoría de su jugador al coordinador
+    // Seguidor reenvía el voto (categoría o dificultad) de su jugador al coordinador
     case 'N_FORWARD_VOTE':
       if (!cluster.isCoordinator) return;
-      game.castVote(msg.playerId, msg.category);
+      game.castVote(msg.playerId, msg.kind, msg.option);
+      break;
+
+    // Seguidor reenvía el cambio de avatar de su jugador al coordinador
+    case 'N_FORWARD_SET_AVATAR':
+      if (!cluster.isCoordinator) return;
+      store.setAvatar(msg.token, msg.avatarId);
+      game.setPlayerAvatar(msg.playerId, msg.avatarId);
       break;
 
     // v2: seguidor pidió un perfil → el coordinador lo lee de su DB y lo devuelve
@@ -393,8 +433,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         client.role     = 'player';
 
         if (cluster.isCoordinator) {
-          const { player, token: playerToken, returning, reconnected } = resolveJoin(playerId, nick, token, NODE_ID);
-          send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected });
+          const { player, token: playerToken, returning, reconnected, avatarId } = resolveJoin(playerId, nick, token, NODE_ID, msg.avatarId);
+          send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId });
           const roundInfo = game.getCurrentRoundInfo();
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
         } else {
@@ -404,6 +444,30 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             playerId,
             nick,
             token,
+            avatarId:   msg.avatarId,
+            originNode: NODE_ID,
+            lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      // Cambio de avatar desde el modal de perfil. La DB la tiene el coordinador
+      // (misma regla que GET_PROFILE), pero el estado en vivo también hay que
+      // actualizarlo para que el ranking lo refleje al instante.
+      case 'SET_AVATAR': {
+        if (!client.playerId || client.role !== 'player') return;
+        const clean = normalizeAvatarId(msg.avatarId);
+        if (clean === null || !msg.token) return;
+        if (cluster.isCoordinator) {
+          store.setAvatar(msg.token, clean);
+          game.setPlayerAvatar(client.playerId, clean);
+        } else {
+          cluster.sendToCoordinator({
+            type:       'N_FORWARD_SET_AVATAR',
+            playerId:   client.playerId,
+            token:      msg.token,
+            avatarId:   clean,
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });
@@ -443,6 +507,21 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         break;
       }
 
+      case 'REQUEST_HINT': {
+        if (!client.playerId || client.role !== 'player') return;
+        if (cluster.isCoordinator) {
+          send(ws, hintPayload(client.playerId));
+        } else {
+          cluster.sendToCoordinator({
+            type:       'N_FORWARD_HINT',
+            playerId:   client.playerId,
+            originNode: NODE_ID,
+            lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
       case 'START_GAME': {
         if (client.role !== 'master') return;
         if (cluster.isCoordinator) {
@@ -457,17 +536,20 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         break;
       }
 
-      // Votación de categoría: uno por jugador, se puede cambiar mientras dure
-      // la ventana. No necesita respuesta puntual, el conteo llega por broadcast.
+      // Votación de categoría/dificultad: un voto de cada por jugador, se puede
+      // cambiar mientras dure la ventana. No necesita respuesta puntual: el
+      // conteo actualizado llega a todos por broadcast.
       case 'CAST_VOTE': {
         if (!client.playerId || client.role !== 'player') return;
+        const kind = msg.kind === 'difficulty' ? 'difficulty' : 'category';
         if (cluster.isCoordinator) {
-          game.castVote(client.playerId, msg.category ?? '');
+          game.castVote(client.playerId, kind, msg.option ?? '');
         } else {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_VOTE',
             playerId:   client.playerId,
-            category:   msg.category ?? '',
+            kind,
+            option:     msg.option ?? '',
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });

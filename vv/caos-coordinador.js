@@ -93,7 +93,9 @@ async function run() {
     log('2 celulares conectados (chaosBot1 en ch1, chaosBot2 en ch3)');
 
     observer.send({ type: 'START_GAME', totalRounds: TOTAL_ROUNDS });
-    await waitForEvent(observer, 'ROUND_START', 8000);
+    // START_GAME abre primero la ventana de votación (categoría + dificultad);
+    // ROUND_START llega recién al cerrarse, no de inmediato.
+    await waitForEvent(observer, 'ROUND_START', 25000);
     lastLiveAt = Date.now();
     log(`partida arrancada (${TOTAL_ROUNDS} rondas)`);
 

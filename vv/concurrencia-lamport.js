@@ -101,7 +101,10 @@ async function run() {
     const master = new Client(NODES[0].port);
     await master.connect();
     master.send({ type: 'MASTER_JOIN' });
-    const roundStartPromise = waitForEvent(bots[0], 'ROUND_START', 5000);
+    // START_GAME abre primero la ventana de votación (categoría + dificultad) y
+    // recién al cerrarse llega ROUND_START -> hay que esperar la votación
+    // completa + la cuenta regresiva, no solo el arranque inmediato de la ronda.
+    const roundStartPromise = waitForEvent(bots[0], 'ROUND_START', 25000);
     master.send({ type: 'START_GAME', totalRounds: 1 });
     const roundStart = await roundStartPromise;
     const hiddenLen = roundStart.hiddenWord.replace(/ /g, '').length;

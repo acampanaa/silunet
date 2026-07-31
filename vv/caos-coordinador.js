@@ -34,9 +34,14 @@ const NODES = [
 ];
 const NODE_WS_URLS = NODES.map(n => `ws://localhost:${n.port}`);
 const TOTAL_ROUNDS = 5;               // margen de sobra para 2 caídas + asentamiento
+// VV_MODE=relajo prueba el modo del reloj comunitario, cuyo camino de failover
+// es distinto: el reloj y el contador de despejadas viajan en el snapshot, así
+// que un coordinador promovido debe continuar la cuenta, no reiniciarla.
+const MODE = process.env.VV_MODE === 'relajo' ? 'relajo' : 'clasico';
 const CONTINUITY_TIMEOUT_MS = 12000;  // cuánto puede tardar como máximo en volver a haber señal de vida
 const COORD_CONFIRM_TIMEOUT_MS = 12000;
 const GAME_END_TIMEOUT_MS = 180000;
+const RELOJ_INICIAL = 45;   // debe coincidir con RELAJO_START_SECONDS de game.ts
 
 const procById = new Map();
 function log(...args) { console.log('[vv-caos]', ...args); }
@@ -44,7 +49,7 @@ function log(...args) { console.log('[vv-caos]', ...args); }
 /** Mata el proceso del nodo `id` como lo haría un apagón real (no un cierre prolijo). */
 function killNode(id) {
   const proc = procById.get(id);
-  log(`💀 matando nodo ${id} (pid ${proc.pid})`);
+  log(`[KILL] matando nodo ${id} (pid ${proc.pid})`);
   proc.kill('SIGKILL');
 }
 
@@ -92,12 +97,24 @@ async function run() {
     ]);
     log('2 celulares conectados (chaosBot1 en ch1, chaosBot2 en ch3)');
 
-    observer.send({ type: 'START_GAME', totalRounds: TOTAL_ROUNDS });
+    observer.send({ type: 'START_GAME', totalRounds: TOTAL_ROUNDS, mode: MODE });
     // START_GAME abre primero la ventana de votación (categoría + dificultad);
     // ROUND_START llega recién al cerrarse, no de inmediato.
     await waitForEvent(observer, 'ROUND_START', 25000);
+
+    // Relajo: se vigila el reloj comunitario para comprobar que un cambio de
+    // coordinador NO lo reinicia (viaja replicado en el snapshot).
+    let reloj = null;
+    let relojAntesDeCaida = null;
+    if (MODE === 'relajo') {
+      observer.on('SHARED_CLOCK', msg => { reloj = msg; });
+      await waitForEvent(observer, 'SHARED_CLOCK', 8000);
+      log(`reloj comunitario inicial: ${reloj.secondsLeft}s`);
+    }
     lastLiveAt = Date.now();
-    log(`partida arrancada (${TOTAL_ROUNDS} rondas)`);
+    log(MODE === 'relajo'
+      ? 'partida arrancada en modo RELAJO (reloj comunitario)'
+      : `partida arrancada (${TOTAL_ROUNDS} rondas)`);
 
     // ── Caída 1: mata al coordinador inicial (ch1) ───────────────────────────
     await sleep(6000); // deja correr la ronda un rato antes de matar nada
@@ -106,15 +123,27 @@ async function run() {
 
     const newCoord1 = await waitForEvent(observer, 'CLUSTER_STATE', COORD_CONFIRM_TIMEOUT_MS,
       msg => { const c = msg.nodes.find(n => n.isCoordinator); return !!c && c.id !== 'ch1' && c.up; });
-    log(`✓ elección Bully tras caída 1: nuevo coordinador = ${newCoord1.nodes.find(n => n.isCoordinator).id} (${Date.now() - t1}ms)`);
+    log(`[OK] elección Bully tras caída 1: nuevo coordinador = ${newCoord1.nodes.find(n => n.isCoordinator).id} (${Date.now() - t1}ms)`);
 
     const life1 = await waitForEvent(observer, 'message', CONTINUITY_TIMEOUT_MS,
       msg => msg.type === 'TICK' || msg.type === 'ROUND_START');
     const gap1 = Date.now() - t1;
     assert.ok(gap1 < CONTINUITY_TIMEOUT_MS, `la partida tardó demasiado en dar señal de vida tras caída 1: ${gap1}ms`);
-    log(`✓ la partida no se congeló: volvió a haber señal de vida (${life1.type}) ${gap1}ms después de matar ch1`);
+    log(`[OK] la partida no se congeló: volvió a haber señal de vida (${life1.type}) ${gap1}ms después de matar ch1`);
+
+    if (MODE === 'relajo') {
+      relojAntesDeCaida = reloj ? reloj.secondsLeft : null;
+    }
 
     await sleep(5000); // deja asentar reconexiones de celulares y pantalla
+
+    if (MODE === 'relajo') {
+      assert.ok(reloj, 'no llegó ningún SHARED_CLOCK tras el failover');
+      // El reloj sigue corriendo (bajó) y NO se reinició a 45s.
+      assert.ok(reloj.secondsLeft < RELOJ_INICIAL,
+        `el reloj comunitario se reinició tras el failover (${reloj.secondsLeft}s)`);
+      log(`[OK] el reloj comunitario sobrevivió al cambio de coordinador: ${relojAntesDeCaida}s -> ${reloj.secondsLeft}s (sin reiniciarse)`);
+    }
 
     // ── Caída 2: mata al nuevo coordinador (debería ser ch3, el de mayor id) ──
     const coordToKill = clusterState.find(n => n.isCoordinator)?.id;
@@ -125,7 +154,7 @@ async function run() {
     const newCoord2 = await waitForEvent(observer, 'CLUSTER_STATE', COORD_CONFIRM_TIMEOUT_MS,
       msg => { const c = msg.nodes.find(n => n.isCoordinator); return !!c && c.id !== coordToKill && c.up; });
     const finalCoordId = newCoord2.nodes.find(n => n.isCoordinator).id;
-    log(`✓ elección Bully tras caída 2: nuevo coordinador = ${finalCoordId} (${Date.now() - t2}ms)`);
+    log(`[OK] elección Bully tras caída 2: nuevo coordinador = ${finalCoordId} (${Date.now() - t2}ms)`);
     assert.notStrictEqual(finalCoordId, 'ch1', 'ch1 sigue muerto, no puede volver a ser coordinador');
     assert.notStrictEqual(finalCoordId, coordToKill, 'el coordinador "nuevo" es el mismo que acabamos de matar');
 
@@ -133,7 +162,7 @@ async function run() {
       msg => msg.type === 'TICK' || msg.type === 'ROUND_START');
     const gap2 = Date.now() - t2;
     assert.ok(gap2 < CONTINUITY_TIMEOUT_MS, `la partida tardó demasiado en dar señal de vida tras caída 2: ${gap2}ms`);
-    log(`✓ la partida SIGUE sin congelarse con un solo nodo vivo: señal de vida (${life2.type}) ${gap2}ms después de matar ${coordToKill}`);
+    log(`[OK] la partida SIGUE sin congelarse con un solo nodo vivo: señal de vida (${life2.type}) ${gap2}ms después de matar ${coordToKill}`);
 
     // ── Deja terminar la partida con el único nodo que queda y revisa el cierre ──
     log('esperando a que la partida termine con el único nodo sobreviviente...');
@@ -142,12 +171,12 @@ async function run() {
     const nicks = finalRanking.entries.map(e => e.nick);
     assert.strictEqual(new Set(nicks).size, nicks.length,
       `hay nicks duplicados en el marcador final tras las caídas: ${JSON.stringify(nicks)}`);
-    log('✓ sin jugadores fantasma/duplicados en el marcador final');
+    log('[OK] sin jugadores fantasma/duplicados en el marcador final');
 
     for (const nick of ['chaosBot1', 'chaosBot2']) {
       assert.ok(nicks.includes(nick), `${nick} desapareció del marcador final en vez de reconectar`);
     }
-    log('✓ los dos celulares que se cayeron con su nodo reconectaron y llegaron hasta el final');
+    log('[OK] los dos celulares que se cayeron con su nodo reconectaron y llegaron hasta el final');
 
     if (process.env.VV_DATABASE_URL) {
       const persistenceDeadline = Date.now() + 10000;
@@ -160,13 +189,13 @@ async function run() {
         if (!persisted) await sleep(250);
       }
       assert.ok(persisted, 'PostgreSQL no confirmó exactamente una partida tras el failover');
-      log('✓ PostgreSQL confirmó una sola partida después de los dos cambios de coordinador');
+      log('[OK] PostgreSQL confirmó una sola partida después de los dos cambios de coordinador');
     }
 
     log('TODO OK — el sistema tolera perder 2 de 3 nodos (incluido el coordinador dos veces) sin congelarse ni perder identidades');
   } catch (err) {
     failed = true;
-    console.error('[vv-caos] ✗ FALLÓ:', err.message);
+    console.error('[vv-caos] [FAIL] FALLÓ:', err.message);
   } finally {
     stopCluster(procById.size ? [...procById.values()] : []);
     await sleep(300);

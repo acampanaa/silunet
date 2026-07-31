@@ -133,13 +133,13 @@ async function run() {
 
     assert.strictEqual(solvers.length, bots.length,
       `se esperaba que los ${bots.length} bots acertaran, llegaron ${solvers.length}`);
-    log('✓ todos los bots quedaron registrados como aciertos (sin pérdidas del candado)');
+    log('[OK] todos los bots quedaron registrados como aciertos (sin pérdidas del candado)');
 
     for (let i = 1; i < solvers.length; i++) {
       assert.ok(solvers[i].lamport > solvers[i - 1].lamport,
         `orden de Lamport violado en posición ${i + 1}: ${JSON.stringify(solvers)}`);
     }
-    log('✓ el ranking final está ordenado estrictamente por timestamp Lamport (Eje 2)');
+    log('[OK] el ranking final está ordenado estrictamente por timestamp Lamport (Eje 2)');
 
     for (const entry of liveOrder) {
       const final = solvers.find(s => s.nick === entry.nick);
@@ -147,7 +147,7 @@ async function run() {
       assert.strictEqual(final.position, entry.position,
         `${entry.nick}: posición anunciada en vivo (${entry.position}) != posición final por Lamport (${final.position})`);
     }
-    log('✓ la posición anunciada en vivo coincide con la posición final (Eje 2 + Eje 3 consistentes)');
+    log('[OK] la posición anunciada en vivo coincide con la posición final (Eje 2 + Eje 3 consistentes)');
 
     const N = solvers.length;
     for (const s of solvers) {
@@ -155,16 +155,16 @@ async function run() {
       assert.strictEqual(s.points, expected,
         `${s.nick}: puntos=${s.points}, esperados=${expected} según su posición lógica`);
     }
-    log('✓ el puntaje corresponde a la posición lógica de llegada, no al tiempo de red');
+    log('[OK] el puntaje corresponde a la posición lógica de llegada, no al tiempo de red');
 
     const nicks = solvers.map(s => s.nick);
     assert.strictEqual(new Set(nicks).size, nicks.length, 'hay nicks duplicados en el ranking final');
-    log('✓ sin jugadores duplicados');
+    log('[OK] sin jugadores duplicados');
 
     log('TODO OK — el orden lógico de Lamport se respeta bajo concurrencia real multi-nodo');
   } catch (err) {
     failed = true;
-    console.error('[vv-concurrencia] ✗ FALLÓ:', err.message);
+    console.error('[vv-concurrencia] [FAIL] FALLÓ:', err.message);
   } finally {
     stopCluster(procs);
     await sleep(300); // deja que los procesos suelten los puertos

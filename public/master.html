@@ -359,6 +359,10 @@
     }
     .hof-row .pos  { color: var(--text-faint); min-width: 20px; }
     .hof-row .avatar, .rank-row .avatar { flex-shrink: 0; }
+    .avatar-photo {
+      display: block; border-radius: 50%; object-fit: cover;
+      background: var(--bg); border: 1px solid rgba(240,67,155,0.35);
+    }
     .hof-row .nick { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hof-row .pts  { font-family: var(--font-mono); color: var(--secondary); font-weight: 700; white-space: nowrap; }
     .hof-empty { color: var(--text-faint); font-size: 0.8rem; }
@@ -578,7 +582,7 @@
       ? top.map((e, i) => `
           <div class="hof-row">
             <span class="pos">${medals[i] ?? '#' + (i + 1)}</span>
-            ${window.SilunetAvatars.avatarSVG(e.avatarId, '22px')}
+            ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '22px', '')}
             <span class="nick">${e.nick}</span>
             <span class="pts">${e.puntosAcumulados} pts</span>
           </div>`).join('')
@@ -884,7 +888,7 @@
     document.getElementById('m-ranking').innerHTML = entries.map((e, i) =>
       `<div class="rank-row ${topClass[i] ?? ''}">
         <span class="rank-pos">${medals[i] ?? '#' + (i+1)}</span>
-        ${window.SilunetAvatars.avatarSVG(e.avatarId, '28px')}
+        ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '28px', '')}
         <span class="rank-nick">${e.nick}</span>
         <span class="rank-score">${e.score} pts</span>
       </div>`

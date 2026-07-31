@@ -48,5 +48,17 @@
       </svg>`;
   }
 
-  window.SilunetAvatars = { avatarSVG, avatarCount, normalizeAvatarId };
+  function avatarHTML(id, key, size = '2rem', alt = '') {
+    const validKey = typeof key === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key);
+    if (!validKey) return avatarSVG(id, size);
+    const safeAlt = String(alt).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[ch]);
+    return `<img class="avatar avatar-photo" src="/api/avatar/${key}"
+      alt="${safeAlt}" width="96" height="96" decoding="async"
+      style="width:${size};height:${size}">`;
+  }
+
+  window.SilunetAvatars = { avatarSVG, avatarHTML, avatarCount, normalizeAvatarId };
 })();

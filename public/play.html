@@ -264,6 +264,10 @@
       transition: transform 0.1s, border-color 0.2s, color 0.2s;
     }
     .profile-fab svg { width: 21px; height: 21px; }
+    .avatar-photo {
+      display: block; border-radius: 50%; object-fit: cover;
+      background: var(--bg); border: 1px solid rgba(240,67,155,0.35);
+    }
     .profile-fab:hover  { border-color: var(--primary); color: var(--primary); }
     .profile-fab:active { transform: scale(0.92); }
 
@@ -304,10 +308,12 @@
       animation: fadeIn 0.18s ease;
     }
     .modal-overlay.active { display: flex; }
+    body.modal-open { overflow: hidden; }
     .modal-card {
       background: var(--surface-glass); backdrop-filter: blur(20px);
       border: 1px solid rgba(240,67,155,0.22); border-radius: 20px;
-      width: 100%; max-width: 380px; padding: 24px; position: relative;
+      width: 100%; max-width: 380px; max-height: min(90vh, 720px); overflow-y: auto;
+      overscroll-behavior: contain; padding: 24px; position: relative;
     }
     .modal-close {
       position: absolute; top: 14px; right: 16px;
@@ -323,7 +329,16 @@
     .ico-cyan   { color: var(--secondary); }
     .ico-pink   { color: var(--primary); }
 
-    .pf-name { font-size: 1.5rem; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+    .pf-hero { text-align: center; margin-bottom: 18px; }
+    .pf-avatar-big {
+      width: 104px; height: 104px; margin: 0 auto 10px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--bg);
+      border: 2px solid rgba(240,67,155,0.45); box-shadow: 0 0 24px rgba(240,67,155,0.18);
+      overflow: hidden;
+    }
+    .pf-avatar-big .avatar { width: 96px !important; height: 96px !important; }
+    .pf-name { font-size: 1.5rem; font-weight: 800; text-align: center; overflow-wrap: anywhere; }
+    .pf-hero .pf-since { margin-bottom: 0; }
     .pf-name .ico { width: 1.6rem; height: 1.6rem; color: var(--primary); }
     .pf-since { color: var(--text-faint); font-size: 0.8rem; margin-bottom: 18px; font-family: var(--font-mono); }
     .pf-stats { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
@@ -369,6 +384,25 @@
     }
     .avatar-opt svg { display: block; }
     .rank-row .avatar, .final-row .avatar { flex-shrink: 0; }
+    .photo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    .photo-action {
+      min-height: 44px; display: flex; align-items: center; justify-content: center;
+      padding: 10px 8px; border: 1px solid rgba(34,211,238,0.35); border-radius: 11px;
+      background: rgba(34,211,238,0.08); color: var(--secondary); cursor: pointer;
+      font-family: var(--font-display); font-size: 0.8rem; font-weight: 700; text-align: center;
+      transition: border-color 0.15s, background 0.15s, transform 0.1s;
+    }
+    .photo-action:active { transform: scale(0.97); }
+    .photo-action:focus-visible, .avatar-opt:focus-visible, .modal-close:focus-visible {
+      outline: 2px solid var(--secondary); outline-offset: 2px;
+    }
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+    .photo-status { min-height: 18px; margin-bottom: 14px; color: var(--text-faint); font-size: 0.76rem; text-align: center; }
+    .photo-status.error { color: var(--error); }
+    .photo-status.success { color: var(--tertiary); }
   </style>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
@@ -393,9 +427,9 @@
 </button>
 
 <!-- v2: modal de perfil -->
-<div class="modal-overlay" id="profile-modal">
+<div class="modal-overlay" id="profile-modal" role="dialog" aria-modal="true" aria-label="Mi perfil">
   <div class="modal-card">
-    <button class="modal-close" onclick="closeProfile()">&times;</button>
+    <button class="modal-close" type="button" onclick="closeProfile()" aria-label="Cerrar perfil">&times;</button>
     <div id="pf-body">
       <p class="pf-empty">Cargando...</p>
     </div>
@@ -504,6 +538,8 @@
   let myVote      = null; // categoría que este celular votó (para resaltarla)
   let myDiffVote  = null; // dificultad votada por este celular
   let myAvatar    = window.SilunetAvatars.normalizeAvatarId(localStorage.getItem('silunet_avatar'));
+  let myAvatarKey = localStorage.getItem('silunet_avatar_key') || null;
+  let avatarUploadPending = false;
 
   // Eje 2: reloj de Lamport del cliente
   let lamport = 0;
@@ -586,8 +622,9 @@
       case 'ROUND_END':       handleRoundEnd(msg);      break;
       case 'RANKING':         handleRanking(msg);       break;
       case 'PROFILE':         handleProfile(msg);       break;
+      case 'AVATAR_UPDATED':  handleAvatarUpdated(msg); break;
       case 'PLAYER_LEFT':     showNotif(`🔌 ${msg.nick} se desconectó`, 'info', 2500); break;
-      case 'ERROR':           showNotif(msg.message, 'error'); break;
+      case 'ERROR':           handleServerError(msg); break;
     }
   }
 
@@ -615,8 +652,11 @@
     if (typeof msg.avatarId === 'number') {
       myAvatar = window.SilunetAvatars.normalizeAvatarId(msg.avatarId);
       localStorage.setItem('silunet_avatar', String(myAvatar));
-      document.getElementById('profile-fab').innerHTML = window.SilunetAvatars.avatarSVG(myAvatar, '30px');
     }
+    myAvatarKey = msg.avatarKey || null;
+    if (myAvatarKey) localStorage.setItem('silunet_avatar_key', myAvatarKey);
+    else localStorage.removeItem('silunet_avatar_key');
+    updateAvatarSurfaces();
 
     // Eje 4: si el servidor nos reconoció por token con puntaje de esta partida
     // en curso, es una RECONEXIÓN (nuestro nodo se cayó o perdimos heartbeat) —
@@ -939,11 +979,13 @@
     const token = localStorage.getItem('silunet_token');
     document.getElementById('pf-body').innerHTML = '<p class="pf-empty">Cargando...</p>';
     document.getElementById('profile-modal').classList.add('active');
+    document.body.classList.add('modal-open');
     send({ type: 'GET_PROFILE', token });
   }
 
   function closeProfile() {
     document.getElementById('profile-modal').classList.remove('active');
+    document.body.classList.remove('modal-open');
   }
 
   // cerrar al tocar el fondo oscuro
@@ -977,13 +1019,27 @@
     if (typeof p.avatarId === 'number') {
       myAvatar = window.SilunetAvatars.normalizeAvatarId(p.avatarId);
       localStorage.setItem('silunet_avatar', String(myAvatar));
-      document.getElementById('profile-fab').innerHTML = window.SilunetAvatars.avatarSVG(myAvatar, '30px');
     }
+    myAvatarKey = p.avatarKey || null;
+    if (myAvatarKey) localStorage.setItem('silunet_avatar_key', myAvatarKey);
+    else localStorage.removeItem('silunet_avatar_key');
+    updateAvatarSurfaces();
 
     body.innerHTML = `
-      <div class="pf-name"><span id="pf-avatar-big">${window.SilunetAvatars.avatarSVG(myAvatar, '2.2rem')}</span> ${p.nick}</div>
-      <div class="pf-since">Jugando desde ${desde}</div>
-      <p class="pf-recientes-title">Tu avatar</p>
+      <div class="pf-hero">
+        <div class="pf-avatar-big" id="pf-avatar-big">${window.SilunetAvatars.avatarHTML(myAvatar, myAvatarKey, '96px', 'Foto de perfil')}</div>
+        <h2 class="pf-name" id="profile-title">${escapeHTML(p.nick)}</h2>
+        <div class="pf-since">Jugando desde ${desde}</div>
+      </div>
+      <p class="pf-recientes-title">Foto personal</p>
+      <div class="photo-actions">
+        <button class="photo-action" id="pf-camera-button" type="button">Tomar foto</button>
+        <button class="photo-action" id="pf-gallery-button" type="button">Elegir de galería</button>
+      </div>
+      <input class="visually-hidden" id="pf-camera-input" type="file" accept="image/*" capture="user" aria-label="Tomar foto de perfil">
+      <input class="visually-hidden" id="pf-gallery-input" type="file" accept="image/*" aria-label="Elegir foto de perfil desde la galería">
+      <p class="photo-status" id="pf-photo-status" role="status" aria-live="polite">Se recorta al centro y se guarda en tamaño reducido.</p>
+      <p class="pf-recientes-title">O elige un avatar</p>
       <div class="avatar-grid" id="pf-avatar-grid"></div>
       <div class="pf-stats">
         <div class="pf-stat"><span class="lbl">${ICON.trophy('ico-gold')} Partidas ganadas</span><span class="v">${p.partidasGanadas}</span></div>
@@ -1002,6 +1058,7 @@
       ${recientes}
     `;
     renderAvatarPicker();
+    bindPhotoInputs();
   }
 
   // Selector de avatar dentro del perfil. Al elegir uno se manda SET_AVATAR:
@@ -1013,24 +1070,153 @@
     const { avatarSVG, avatarCount } = window.SilunetAvatars;
     let html = '';
     for (let i = 0; i < avatarCount(); i++) {
-      html += `<button type="button" class="avatar-opt${i === myAvatar ? ' sel' : ''}"
+      html += `<button type="button" class="avatar-opt${!myAvatarKey && i === myAvatar ? ' sel' : ''}"
                  data-id="${i}" aria-label="Avatar ${i + 1}"
-                 aria-pressed="${i === myAvatar}">${avatarSVG(i, '62%')}</button>`;
+                 aria-pressed="${!myAvatarKey && i === myAvatar}">${avatarSVG(i, '62%')}</button>`;
     }
     grid.innerHTML = html;
     grid.querySelectorAll('.avatar-opt').forEach(btn => {
       btn.addEventListener('click', () => {
         myAvatar = Number(btn.dataset.id);
+        myAvatarKey = null;
         localStorage.setItem('silunet_avatar', String(myAvatar));
+        localStorage.removeItem('silunet_avatar_key');
         send({ type: 'SET_AVATAR', token: localStorage.getItem('silunet_token'), avatarId: myAvatar });
-        // innerHTML (no DOMParser): el SVG se genera sin xmlns, así que parsearlo
-        // como documento suelto falla y dejaba el avatar en blanco.
-        const big = document.getElementById('pf-avatar-big');
-        if (big) big.innerHTML = avatarSVG(myAvatar, '2.2rem');
-        document.getElementById('profile-fab').innerHTML = avatarSVG(myAvatar, '30px');
+        updateAvatarSurfaces();
         renderAvatarPicker();
       });
     });
+  }
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[ch]);
+  }
+
+  function updateAvatarSurfaces() {
+    const { avatarHTML } = window.SilunetAvatars;
+    const fab = document.getElementById('profile-fab');
+    if (fab) fab.innerHTML = avatarHTML(myAvatar, myAvatarKey, '30px', '');
+    const big = document.getElementById('pf-avatar-big');
+    if (big) big.innerHTML = avatarHTML(myAvatar, myAvatarKey, '96px', 'Foto de perfil');
+  }
+
+  function setPhotoStatus(text, kind = '') {
+    const status = document.getElementById('pf-photo-status');
+    if (!status) return;
+    status.textContent = text;
+    status.className = `photo-status ${kind}`.trim();
+  }
+
+  function bindPhotoInputs() {
+    const controls = [
+      ['pf-camera-button', 'pf-camera-input'],
+      ['pf-gallery-button', 'pf-gallery-input'],
+    ];
+    for (const [buttonId, id] of controls) {
+      const input = document.getElementById(id);
+      document.getElementById(buttonId)?.addEventListener('click', () => input?.click());
+      input?.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        input.value = '';
+        if (file) await uploadProfilePhoto(file);
+      });
+    }
+  }
+
+  async function uploadProfilePhoto(file) {
+    if (avatarUploadPending) return;
+    if (!file.type.startsWith('image/')) {
+      setPhotoStatus('Elige un archivo de imagen.', 'error');
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setPhotoStatus('La foto original supera 12 MB. Elige una más pequeña.', 'error');
+      return;
+    }
+    avatarUploadPending = true;
+    setPhotoStatus('Preparando y subiendo foto…');
+    try {
+      const dataUrl = await squarePhotoDataUrl(file);
+      send({ type: 'SET_CUSTOM_AVATAR', token: localStorage.getItem('silunet_token'), dataUrl });
+    } catch (error) {
+      avatarUploadPending = false;
+      setPhotoStatus(error.message || 'No se pudo procesar la foto.', 'error');
+    }
+  }
+
+  async function squarePhotoDataUrl(file) {
+    const loaded = await loadPhotoSource(file);
+    try {
+      const side = Math.min(loaded.width, loaded.height);
+      const sx = (loaded.width - side) / 2;
+      const sy = (loaded.height - side) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.fillStyle = '#0f0f1a';
+      ctx.fillRect(0, 0, 256, 256);
+      ctx.drawImage(loaded.source, sx, sy, side, side, 0, 0, 256, 256);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      if (!blob || blob.size > 200 * 1024) throw new Error('No se pudo reducir la foto. Elige otra imagen.');
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('No se pudo leer la foto.'));
+        reader.readAsDataURL(blob);
+      });
+    } finally {
+      loaded.close();
+    }
+  }
+
+  async function loadPhotoSource(file) {
+    if ('createImageBitmap' in window) {
+      try {
+        const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        return { source: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
+      } catch { /* Safari antiguo: usar Image + object URL. */ }
+    }
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error('El navegador no pudo abrir esta foto.'));
+        element.src = objectUrl;
+      });
+      return {
+        source: image,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        close: () => URL.revokeObjectURL(objectUrl),
+      };
+    } catch (error) {
+      URL.revokeObjectURL(objectUrl);
+      throw error;
+    }
+  }
+
+  function handleAvatarUpdated(msg) {
+    avatarUploadPending = false;
+    myAvatar = window.SilunetAvatars.normalizeAvatarId(msg.avatarId);
+    myAvatarKey = msg.avatarKey || null;
+    localStorage.setItem('silunet_avatar', String(myAvatar));
+    if (myAvatarKey) localStorage.setItem('silunet_avatar_key', myAvatarKey);
+    else localStorage.removeItem('silunet_avatar_key');
+    updateAvatarSurfaces();
+    renderAvatarPicker();
+    setPhotoStatus(myAvatarKey ? 'Foto de perfil actualizada.' : 'Avatar actualizado.', 'success');
+  }
+
+  function handleServerError(msg) {
+    if (avatarUploadPending) {
+      avatarUploadPending = false;
+      setPhotoStatus(msg.message, 'error');
+    }
+    showNotif(msg.message, 'error');
   }
 
   // ── Guess ──────────────────────────────────────────────────────────────────
@@ -1103,7 +1289,7 @@
     document.getElementById('p-ranking').innerHTML = entries.slice(0, 5).map((e, i) =>
       `<div class="rank-row ${e.nick === myNick ? 'me' : ''}">
         <span class="rank-pos">#${i+1}</span>
-        ${window.SilunetAvatars.avatarSVG(e.avatarId, '22px')}
+        ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '22px', '')}
         <span class="rank-nick">${e.nick}</span>
         <span class="rank-score">${e.score}</span>
       </div>`
@@ -1115,7 +1301,7 @@
     document.getElementById('ge-list').innerHTML = entries.map((e, i) =>
       `<div class="final-row ${topClass[i] ?? ''}">
         <span class="medal">${i < 3 ? ICON.medalNum(i + 1, ['ico-gold','ico-silver','ico-bronze'][i]) : '#' + (i+1)}</span>
-        ${window.SilunetAvatars.avatarSVG(e.avatarId, '26px')}
+        ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '26px', '')}
         <span class="final-nick">${e.nick}</span>
         <span class="final-score">${e.score} pts</span>
       </div>`

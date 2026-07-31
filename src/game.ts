@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { randomUUID } from 'node:crypto';
 import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty } from './types';
 import { getRandomRounds, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
 import { LamportClock } from './lamport';
@@ -23,6 +24,8 @@ export class Game extends EventEmitter {
   private players         = new Map<string, Player>();
   private phase: GamePhase = 'waiting';
   private rounds: WordEntry[] = [];
+  private currentGameId?: string;
+  private pendingGameOverResult?: GameOverResult;
   private currentRoundIndex  = -1;
   private round?: RoundState;
   private timer?: ReturnType<typeof setInterval>;
@@ -62,7 +65,7 @@ export class Game extends EventEmitter {
   getRanking(): RankEntry[] {
     return [...this.players.values()]
       .sort((a, b) => b.score - a.score)
-      .map(p => ({ nick: p.nick, score: p.score, avatarId: p.avatarId ?? 0 }));
+      .map(p => ({ nick: p.nick, score: p.score, avatarId: p.avatarId ?? 0, avatarKey: p.avatarKey }));
   }
 
   /** Pulso del motor distribuido para el panel didáctico de /master (Eje 2 + Eje 3). */
@@ -89,6 +92,8 @@ export class Game extends EventEmitter {
   snapshot(): GameSnapshot {
     return {
       phase:             this.phase,
+      currentGameId:     this.currentGameId,
+      pendingGameOverResult: this.pendingGameOverResult ?? null,
       rounds:            this.rounds,
       currentRoundIndex: this.currentRoundIndex,
       round:             this.round ?? null,
@@ -108,6 +113,8 @@ export class Game extends EventEmitter {
    */
   restore(s: GameSnapshot): void {
     this.phase             = s.phase;
+    this.currentGameId     = s.currentGameId;
+    this.pendingGameOverResult = s.pendingGameOverResult ?? undefined;
     this.rounds            = s.rounds;
     this.currentRoundIndex = s.currentRoundIndex;
     this.round             = s.round
@@ -142,6 +149,10 @@ export class Game extends EventEmitter {
       // desde cero (ya es bastante desincronización con el propio failover) ->
       // cierra la votación ya mismo con lo que se alcanzó a replicar.
       this.finishVote();
+    } else if (this.phase === 'gameEnd' && this.pendingGameOverResult) {
+      // El resultado viaja en el snapshot. Si el coordinador anterior cayó
+      // antes de confirmar PostgreSQL, el nuevo líder reintenta el mismo UUID.
+      this.emit('game_over', this.pendingGameOverResult);
     }
   }
 
@@ -155,7 +166,7 @@ export class Game extends EventEmitter {
    * perder la señal, reconectar por cualquier nodo vivo del clúster con el
    * mismo token, y seguir jugando sin perder lo acumulado en esta partida.
    */
-  addPlayer(id: string, nick: string, token: string | undefined, originNode: string, avatarId?: number): Player {
+  addPlayer(id: string, nick: string, token: string | undefined, originNode: string, avatarId?: number, avatarKey?: string): Player {
     if (token) {
       const existing = [...this.players.values()].find(p => p.token === token && p.connected === false);
       if (existing) {
@@ -166,6 +177,7 @@ export class Game extends EventEmitter {
         existing.connected  = true;
         existing.originNode = originNode;
         if (avatarId != null) existing.avatarId = avatarId;
+        if (avatarKey !== undefined) existing.avatarKey = avatarKey;
         this.players.set(id, existing);
         if (this.round) {
           this.round.hintedPlayerIds = this.round.hintedPlayerIds
@@ -177,7 +189,7 @@ export class Game extends EventEmitter {
         return existing;
       }
     }
-    const player: Player = { id, nick, score: 0, token, connected: true, originNode, avatarId: avatarId ?? 0 };
+    const player: Player = { id, nick, score: 0, token, connected: true, originNode, avatarId: avatarId ?? 0, avatarKey };
     this.players.set(id, player);
     this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
     return player;
@@ -189,8 +201,16 @@ export class Game extends EventEmitter {
    */
   setPlayerAvatar(playerId: string, avatarId: number): void {
     const p = this.players.get(playerId);
-    if (!p || p.avatarId === avatarId) return;
+    if (!p || (p.avatarId === avatarId && !p.avatarKey)) return;
     p.avatarId = avatarId;
+    p.avatarKey = undefined;
+    this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
+  }
+
+  setPlayerCustomAvatar(playerId: string, avatarKey: string): void {
+    const p = this.players.get(playerId);
+    if (!p || p.avatarKey === avatarKey) return;
+    p.avatarKey = avatarKey;
     this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
   }
 
@@ -352,6 +372,8 @@ export class Game extends EventEmitter {
       else p.score = 0;
     }
     this.rounds = getRandomRounds(totalRounds, categories, difficulty);
+    this.currentGameId = randomUUID();
+    this.pendingGameOverResult = undefined;
     this.currentRoundIndex = -1;
     this.nextRound();
   }
@@ -563,7 +585,6 @@ export class Game extends EventEmitter {
   private endGame() {
     if (this.timer) clearInterval(this.timer);
     this.phase = 'gameEnd';
-    this.broadcastRanking(true);
 
     // v2: emitir el resultado final para que el coordinador lo persista (Paso 3).
     // Es un evento interno, NO un broadcast de red: server.ts decide si guardar.
@@ -577,7 +598,15 @@ export class Game extends EventEmitter {
         position: i + 1,
         medalla:  medallas[i] ?? null,
       }));
-    const result: GameOverResult = { totalRounds: this.rounds.length, standings };
+    const result: GameOverResult = {
+      gameId: this.currentGameId ?? randomUUID(),
+      totalRounds: this.rounds.length,
+      standings,
+    };
+    // Se asigna ANTES del broadcast final: ese broadcast dispara N_REPLICATE,
+    // por lo que los seguidores reciben también el resultado pendiente.
+    this.pendingGameOverResult = result;
+    this.broadcastRanking(true);
     this.emit('game_over', result);
   }
 

@@ -11,6 +11,9 @@ export interface Player {
   // Índice del avatar elegido en /join (ver public/avatars.js). Es solo un
   // número: viaja gratis dentro de RANKING, que se difunde constantemente.
   avatarId?: number;
+  // Clave pública de una foto personalizada. La imagen no viaja en snapshots;
+  // los clientes la descargan una vez desde /api/avatar/:key.
+  avatarKey?: string;
   // v2: identidad persistente del jugador (token guardado en su propio celular).
   // Viaja en el snapshot para que el coordinador electo sepa a quién persistir.
   token?: string;
@@ -53,6 +56,7 @@ export interface RankEntry {
   nick: string;
   score: number;
   avatarId?: number;
+  avatarKey?: string;
 }
 
 // v2: resultado final de una partida, emitido por Game como evento interno
@@ -67,6 +71,7 @@ export interface FinalStanding {
 }
 
 export interface GameOverResult {
+  gameId: string;
   totalRounds: number;
   standings: FinalStanding[];
 }
@@ -82,6 +87,7 @@ export interface PerfilReciente {
 export interface Perfil {
   nick: string;
   avatarId: number;
+  avatarKey?: string;
   creadoEn: string;
   partidasJugadas: number;
   partidasGanadas: number;
@@ -95,6 +101,7 @@ export interface Perfil {
 export interface HallOfFameEntry {
   nick: string;
   avatarId: number;
+  avatarKey?: string;
   partidasJugadas: number;
   puntosAcumulados: number;
   oro: number;
@@ -114,6 +121,8 @@ export interface RecentGame {
 // una réplica pasiva y pueda continuar la partida si es promovido a coordinador.
 export interface GameSnapshot {
   phase: GamePhase;
+  currentGameId?: string;
+  pendingGameOverResult?: GameOverResult | null;
   rounds: WordEntry[];
   currentRoundIndex: number;
   round: RoundState | null;
@@ -131,7 +140,7 @@ export type S2C =
   // v2: token = identidad persistente (el celular lo guarda); returning = "ya jugaste antes"
   // score = puntaje autoritativo actual (para reconstruirlo tras una reconexión);
   // reconnected = true si esta identidad ya tenía puntaje en la partida en curso.
-  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean; avatarId: number }
+  | { type: 'WELCOME'; playerId: string; nick: string; playerCount: number; token: string; returning: boolean; score: number; reconnected: boolean; avatarId: number; avatarKey?: string }
   | { type: 'PLAYER_COUNT'; count: number }
   | { type: 'PLAYER_LEFT'; nick: string }  // Eje 4: "Jugador X: Desconectado"
   // Votación: el master pulsó "Iniciar partida" -> se abre una ventana de
@@ -164,6 +173,7 @@ export type S2C =
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
   // v2: perfil persistente solicitado por el celular (null si el token no existe)
   | { type: 'PROFILE'; profile: Perfil | null }
+  | { type: 'AVATAR_UPDATED'; avatarId: number; avatarKey: string | null }
   // v2.1: salón de la fama solicitado por la pantalla maestra
   | { type: 'HALL_OF_FAME'; top: HallOfFameEntry[]; recentGames: RecentGame[] }
   // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling).
@@ -190,6 +200,7 @@ export type N2N =
   | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; token: string | null; avatarId?: number; originNode: string; lamport: number }
   // Cambio de avatar: el seguidor lo reenvía al coordinador (solo él tiene DB)
   | { type: 'N_FORWARD_SET_AVATAR'; playerId: string; token: string; avatarId: number; originNode: string; lamport: number }
+  | { type: 'N_FORWARD_CUSTOM_AVATAR'; playerId: string; token: string; dataUrl: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }
@@ -207,6 +218,7 @@ export type N2N =
 export type C2S =
   | { type: 'JOIN'; nick: string; token?: string | null; avatarId?: number }  // v2: token persistente opcional
   | { type: 'SET_AVATAR'; token: string; avatarId: number }  // cambiar avatar desde el perfil
+  | { type: 'SET_CUSTOM_AVATAR'; token: string; dataUrl: string }
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'REQUEST_HINT' }

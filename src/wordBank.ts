@@ -554,10 +554,45 @@ export function getCategoryCounts(): Array<{ name: string; count: number }> {
  * banco vacío, para que una combinación sin palabras nunca produzca una
  * partida de cero rondas.
  */
+/**
+ * Baraja de verdad (Fisher-Yates). El truco de `sort(() => Math.random() - 0.5)`
+ * viola el contrato del comparador: reparte sesgado y el resultado depende del
+ * motor, así que ciertas palabras salían primero mucho más seguido.
+ */
+function shuffle<T>(items: readonly T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * `recentWords`: palabras ya usadas en partidas anteriores, ordenadas de la más
+ * antigua a la más reciente. Se prefieren SIEMPRE las que no han salido; solo
+ * cuando no alcanzan (el pool de una combinación temática+dificultad puede ser
+ * de apenas 6-8 palabras) se recicla, y empezando por las más antiguas.
+ *
+ * Dentro de una misma partida nunca hubo repetidas: el problema real era entre
+ * partidas seguidas, donde cada una volvía a consumir el pool completo.
+ */
+/** Tope duro de rondas por partida. Con el pool efectivo actual (~20 palabras
+ *  por temática) permite dos partidas seguidas sin repetir ni una palabra. */
+export const MAX_ROUNDS = 8;
+
+/** Dificultades de las que se puede tomar prestado, en orden de cercanía. */
+const NEIGHBOUR_DIFFICULTIES: Record<Difficulty, Difficulty[]> = {
+  facil:      ['intermedio', 'dificil'],
+  intermedio: ['facil', 'dificil'],
+  dificil:    ['intermedio', 'facil'],
+};
+
 export function getRandomRounds(
   count: number,
   categories?: string[],
   difficulty?: Difficulty,
+  recentWords: readonly string[] = [],
 ): WordEntry[] {
   let pool = WORD_BANK;
 
@@ -565,11 +600,62 @@ export function getRandomRounds(
     const byCategory = pool.filter(w => categories.includes(w.category));
     if (byCategory.length > 0) pool = byCategory;
   }
+
+  // La dificultad votada es una PREFERENCIA, no un corte duro. Filtrarla como
+  // corte dejaba pools de 6-8 palabras: la partida consumía el pool entero y la
+  // siguiente repetía todo. Aquí se ordena el pool por cercanía a lo votado y
+  // se deja que la selección de abajo tome prestado solo lo que falte.
   if (difficulty) {
-    const byDifficulty = pool.filter(w => w.difficulty === difficulty);
-    if (byDifficulty.length > 0) pool = byDifficulty;
+    const byLevel = (d: Difficulty) => pool.filter(w => w.difficulty === d);
+    pool = [byLevel(difficulty), ...NEIGHBOUR_DIFFICULTIES[difficulty].map(byLevel)].flat();
   }
 
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, pool.length));
+  return pickFreshFirst(pool, Math.min(count, MAX_ROUNDS), recentWords);
+}
+
+/**
+ * Cola para el modo Relajo: sin temática ni dificultad, el banco COMPLETO
+ * mezclado. Un modo sin final necesita un pool grande — con las 160 palabras
+ * puede correr muchísimo antes de tener que reciclar.
+ */
+export function getMixedQueue(count: number, recentWords: readonly string[] = []): WordEntry[] {
+  return pickFreshFirst(WORD_BANK, count, recentWords);
+}
+
+/**
+ * Elige `count` palabras priorizando las que NO han salido recientemente; si no
+ * alcanzan, recicla empezando por las más antiguas. `pool` debe venir ya
+ * ordenado por prioridad (p. ej. dificultad votada primero).
+ */
+function pickFreshFirst(
+  pool: readonly WordEntry[],
+  count: number,
+  recentWords: readonly string[],
+): WordEntry[] {
+  const total = Math.min(count, pool.length);
+
+  // índice mayor = usada más recientemente
+  const usedAt = new Map<string, number>();
+  recentWords.forEach((w, i) => usedAt.set(w, i));
+
+  // Se baraja dentro de cada nivel para no perder la prioridad del pool.
+  const nuncaUsadas = shuffleByLevel(pool.filter(w => !usedAt.has(w.word)));
+  if (nuncaUsadas.length >= total) return shuffle(nuncaUsadas.slice(0, total));
+
+  const masAntiguasPrimero = pool
+    .filter(w => usedAt.has(w.word))
+    .sort((a, b) => usedAt.get(a.word)! - usedAt.get(b.word)!);
+
+  return shuffle([...nuncaUsadas, ...masAntiguasPrimero.slice(0, total - nuncaUsadas.length)]);
+}
+
+/** Baraja dentro de cada nivel sin alterar el orden entre niveles: así la
+ *  dificultad votada sigue saliendo primero, pero no siempre en el mismo orden. */
+function shuffleByLevel(words: readonly WordEntry[]): WordEntry[] {
+  const groups = new Map<Difficulty, WordEntry[]>();
+  for (const w of words) {
+    const g = groups.get(w.difficulty);
+    if (g) g.push(w); else groups.set(w.difficulty, [w]);
+  }
+  return [...groups.values()].flatMap(shuffle);
 }

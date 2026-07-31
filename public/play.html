@@ -163,6 +163,22 @@
     .hint-card strong { color: var(--gold); }
     .hint-cost { display: block; margin-top: 4px; color: var(--text-faint); font-family: var(--font-mono); font-size: 0.7rem; }
 
+    /* Modo Relajo: reloj comunitario, reemplaza al temporizador de ronda */
+    .relajo-row {
+      display: none; width: 100%; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 10px 14px; margin-bottom: 4px;
+      background: var(--surface-glass); border: 1px solid rgba(163,230,53,0.35);
+      border-radius: 12px; font-family: var(--font-mono);
+    }
+    .relajo-row.show { display: flex; }
+    .relajo-row .rj-clock { font-size: 1.7rem; font-weight: 800; color: var(--tertiary);
+      font-variant-numeric: tabular-nums; }
+    .relajo-row .rj-clock.critico { color: var(--error); animation: latido 0.6s ease-in-out infinite; }
+    @keyframes latido { 0%,100%{transform:scale(1);} 50%{transform:scale(1.1);} }
+    .relajo-row .rj-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-faint); display: block; }
+    .relajo-row b { font-size: 1.05rem; color: var(--secondary); }
+
     /* Timer */
     .timer-row { display: flex; align-items: center; gap: 10px; width: 100%; }
     .timer-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; overflow: hidden; }
@@ -279,7 +295,9 @@
       font-size: 0.85rem; font-weight: 600; text-align: center;
       padding: 10px 12px; transform: translateY(-100%);
       transition: transform 0.2s ease;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
     }
+    .reconnect-banner .ico { width: 1rem; height: 1rem; }
     .reconnect-banner.show { transform: translateY(0); }
 
     /* Cuenta regresiva "3, 2, 1, ¡YA!" antes de cada ronda (sincroniza al
@@ -404,13 +422,17 @@
     .photo-status.error { color: var(--error); }
     .photo-status.success { color: var(--tertiary); }
   </style>
+  <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
 </head>
 <body>
 
 <!-- Eje 4: aviso de reconexión -->
-<div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión, reconectando...</div>
+<div class="reconnect-banner" id="reconnect-banner">
+  <span data-silunet-icon="refresh"></span>
+  <span>Se perdió la conexión, reconectando...</span>
+</div>
 
 <!-- Cuenta regresiva "3, 2, 1, ¡YA!" (COUNTDOWN del servidor, sincronizada) -->
 <div class="countdown-overlay" id="countdown-overlay">
@@ -490,7 +512,13 @@
     <div class="hint-card" id="p-hint-card" role="status" aria-live="polite"></div>
   </div>
 
-  <div class="timer-row">
+  <div class="relajo-row" id="p-relajo">
+    <div><span class="rj-lbl">Para todos</span><span class="rj-clock" id="p-rj-clock">45</span></div>
+    <div><span class="rj-lbl">Despejadas</span><b id="p-rj-cleared">0</b></div>
+    <div><span class="rj-lbl">Tu acierto suma</span><b id="p-rj-bonus">+2</b></div>
+  </div>
+
+  <div class="timer-row" id="p-timer-row">
     <div class="timer-bar-bg"><div class="timer-bar" id="p-bar" style="width:100%"></div></div>
     <div class="timer-num" id="p-timer">24</div>
   </div>
@@ -615,6 +643,7 @@
       case 'COUNTDOWN':       handleCountdown(msg);     break;
       case 'ROUND_START':     handleRoundStart(msg);    break;
       case 'TICK':            handleTick(msg);          break;
+      case 'SHARED_CLOCK':    handleSharedClock(msg);   break;
       case 'CORRECT_ANSWER':  handleCorrectAnswer(msg); break;
       case 'HINT_RESULT':     handleHintResult(msg);    break;
       case 'WRONG_ANSWER':    handleWrongAnswer();       break;
@@ -623,7 +652,7 @@
       case 'RANKING':         handleRanking(msg);       break;
       case 'PROFILE':         handleProfile(msg);       break;
       case 'AVATAR_UPDATED':  handleAvatarUpdated(msg); break;
-      case 'PLAYER_LEFT':     showNotif(`🔌 ${msg.nick} se desconectó`, 'info', 2500); break;
+      case 'PLAYER_LEFT':     showNotif(`${msg.nick} se desconectó`, 'info', 2500); break;
       case 'ERROR':           handleServerError(msg); break;
     }
   }
@@ -642,6 +671,14 @@
   connectWS();
 
   // ── Handlers ───────────────────────────────────────────────────────────────
+  // Devuelve el celular al estado clásico (temporizador de ronda visible).
+  function salirDeRelajo() {
+    const r = document.getElementById('p-relajo');
+    if (r) r.classList.remove('show');
+    const t = document.getElementById('p-timer-row');
+    if (t) t.style.display = '';
+  }
+
   function handleWelcome(msg) {
     myPlayerId = msg.playerId;
     // v2: guardar la identidad persistente y reflejar el nick autoritativo del servidor
@@ -670,11 +707,11 @@
 
     const greet = document.getElementById('w-greet');
     if (msg.reconnected) {
-      if (greet) greet.textContent = `Reconectado, ${myNick} 🔄 — sigues en la partida`;
+      if (greet) greet.textContent = `Reconectado, ${myNick} — sigues en la partida`;
     } else {
       showScreen('s-waiting');
       // "¡Hola de nuevo!" si el servidor reconoció el token de este celular
-      if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}! 👋` : `¡Bienvenido, ${myNick}!`;
+      if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}!` : `¡Bienvenido, ${myNick}!`;
     }
     setCount(msg.playerCount);
     // v2: ya hay identidad → habilitar el botón de perfil
@@ -688,7 +725,22 @@
   // ── Votación de temática + dificultad ─────────────────────────────────────
   // Son dos votos independientes en la misma ventana: cada jugador puede elegir
   // una temática Y una dificultad, y cambiar cualquiera de las dos hasta que cierre.
+  // Modo Relajo: reloj comunitario. Sustituye al temporizador de ronda, porque
+  // lo que importa no es cuánto queda de ESTA silueta sino de la partida entera.
+  function handleSharedClock(msg) {
+    document.getElementById('p-relajo').classList.add('show');
+    document.getElementById('p-timer-row').style.display = 'none';
+    const c = document.getElementById('p-rj-clock');
+    c.textContent = msg.secondsLeft;
+    c.classList.toggle('critico', msg.secondsLeft <= 10);
+    document.getElementById('p-rj-cleared').textContent = msg.cleared;
+    document.getElementById('p-rj-bonus').textContent = '+' + msg.bonusPerSolver;
+  }
+
   function handleVoteStart(msg) {
+    // volver al modo clásico: se recupera el temporizador de ronda
+    document.getElementById('p-relajo').classList.remove('show');
+    document.getElementById('p-timer-row').style.display = '';
     myVote = null;
     myDiffVote = null;
     document.getElementById('v-winner').textContent = '';
@@ -740,7 +792,7 @@
 
   function handleVoteResult(msg) {
     document.getElementById('v-winner').textContent =
-      `🎉 ¡${msg.winner} · ${msg.difficultyLabel || msg.difficulty}!`;
+      `¡${msg.winner} · ${msg.difficultyLabel || msg.difficulty}!`;
     AudioFX.correct();
   }
 
@@ -941,6 +993,7 @@
       document.getElementById('p-score').textContent = myScore + ' pts';
     }
     if (msg.final) {
+      salirDeRelajo();
       renderFinalRanking(msg.entries);
       showScreen('s-gameEnd');
       AudioFX.gameEnd();
@@ -949,28 +1002,7 @@
     renderMiniRanking(msg.entries);
   }
 
-  // ── Iconos SVG inline ────────────────────────────────────────────────────────
-  // Trazo lineal (no emoji): se ven igual en todos los celulares y se colorean
-  // con la paleta vía currentColor. Sin fuente de iconos externa — la LAN de la
-  // feria no tiene salida a internet.
-  const svgWrap = (cls, inner) =>
-    `<svg class="ico ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
-
-  const ICON = {
-    user:    (c = '') => svgWrap(c, '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
-    trophy:  (c = '') => svgWrap(c, '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'),
-    gamepad: (c = '') => svgWrap(c, '<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><rect x="2" y="6" width="20" height="12" rx="5"/>'),
-    star:    (c = '') => svgWrap(c, '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
-    medal:   (c = '') => svgWrap(c, '<circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>'),
-    // Medalla con el puesto dentro: oro/plata/bronce se distinguían solo por
-    // color, y a tamaño pequeño (o para alguien daltónico) eran idénticas.
-    medalNum: (n, c = '') => svgWrap(c,
-      '<circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>'
-      + `<text x="12" y="8.4" text-anchor="middle" dominant-baseline="middle" stroke="none"
-           fill="currentColor" font-size="8" font-weight="700"
-           font-family="JetBrains Mono, monospace">${n}</text>`),
-  };
+  const ICON = window.SilunetIcons;
 
   const MEDAL_POS = { oro: 1, plata: 2, bronce: 3 };
 

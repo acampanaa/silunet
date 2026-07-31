@@ -101,7 +101,16 @@
     .node-dot.coord { border-color: var(--gold); color: var(--gold); }
     .node-dot.coord .dot.ok { background: var(--gold); box-shadow: 0 0 9px var(--gold); }
     .node-dot.offline { opacity: 0.55; }
-    .node-dot .star { font-size: 0.7rem; }
+    .node-role-icon { display: inline-flex; align-items: center; color: var(--gold); }
+    .node-role-icon .ico { width: 0.85rem; height: 0.85rem; }
+
+    .ico {
+      width: 1em; height: 1em; flex-shrink: 0;
+      stroke-width: 2; vertical-align: -0.14em;
+    }
+    .ico-gold   { color: var(--gold); }
+    .ico-silver { color: #cbd5e1; }
+    .ico-bronze { color: #d97706; }
 
     /* Eje 4: aviso de reconexión (se cayó el nodo al que estaba pegada esta
        pantalla -> reintentando por el clúster, ver script al final). */
@@ -112,7 +121,9 @@
       font-size: 0.9rem; font-weight: 600; text-align: center;
       padding: 10px 12px; transform: translateY(-100%);
       transition: transform 0.2s ease;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
     }
+    .reconnect-banner .ico { width: 1rem; height: 1rem; }
     .reconnect-banner.show { transform: translateY(0); }
 
     /* ── Panel didáctico: Eje 2 (Lamport) + Eje 3 (candado) + Eje 4 (Bully) ── */
@@ -129,6 +140,7 @@
       padding: 5px 13px; white-space: nowrap;
       transition: border-color 0.2s, color 0.2s;
     }
+    .engine-chip .ico { width: 1rem; height: 1rem; }
     .engine-chip b { color: var(--secondary); font-variant-numeric: tabular-nums;
       text-shadow: 0 0 8px rgba(34, 211, 238, 0.45); }
     .engine-chip.mutex.busy { border-color: var(--primary); color: var(--primary);
@@ -274,7 +286,8 @@
       box-shadow: 0 0 22px rgba(251, 191, 36, 0.15); }
     .rank-row.top2 { border: 1px solid #9ca3af; background: rgba(156,163,175,0.08); }
     .rank-row.top3 { border: 1px solid #b45309; background: rgba(180,83,9,0.08); }
-    .rank-pos { font-size: 1.2rem; min-width: 28px; }
+    .rank-pos { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; }
+    .rank-pos .ico { width: 1.3rem; height: 1.3rem; }
     .rank-nick { flex: 1; font-weight: 600; }
     .rank-score { font-family: var(--font-mono); font-weight: 700; color: var(--secondary); }
 
@@ -308,6 +321,29 @@
     }
     .btn-start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
     .btn-start:hover:not(:disabled) { filter: brightness(1.1); }
+    .btn-relajo { background: var(--tertiary); color: #14210a; box-shadow: 0 0 22px rgba(163,230,53,0.35); }
+
+    /* ── Modo Relajo: reloj comunitario ── */
+    .relajo-bar {
+      display: none; align-items: center; justify-content: center; gap: 28px;
+      padding: 10px 28px; background: rgba(20,20,34,0.7);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .relajo-bar.show { display: flex; }
+    .relajo-clock {
+      font-family: var(--font-mono); font-size: 3.2rem; font-weight: 800;
+      color: var(--tertiary); font-variant-numeric: tabular-nums; line-height: 1;
+      text-shadow: 0 0 22px rgba(163,230,53,0.45);
+    }
+    /* Bajo 10s el reloj pasa a rojo: es la señal de que se acaba para TODOS. */
+    .relajo-clock.critico { color: var(--error); text-shadow: 0 0 22px rgba(239,68,68,0.55);
+      animation: latido 0.6s ease-in-out infinite; }
+    @keyframes latido { 0%,100%{transform:scale(1);} 50%{transform:scale(1.09);} }
+    .relajo-dato { display: flex; flex-direction: column; align-items: center; gap: 2px;
+      font-family: var(--font-mono); }
+    .relajo-dato b { font-size: 1.9rem; color: var(--secondary); font-variant-numeric: tabular-nums; }
+    .relajo-dato span { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }
+    .relajo-bonus { color: var(--tertiary); }
     .phase-badge {
       padding: 6px 14px; border-radius: 20px;
       font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600;
@@ -350,14 +386,17 @@
       padding: 18px 24px; width: 640px;
     }
     .hof-col { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-    .hof-title { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase;
-      letter-spacing: 0.1em; color: var(--text-faint); }
+    .hof-title { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono);
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); }
+    .hof-title .ico { width: 1rem; height: 1rem; color: var(--secondary); }
     .hof-list { display: flex; flex-direction: column; gap: 6px; }
     .hof-row {
       display: flex; align-items: center; gap: 8px;
       background: var(--bg); border-radius: 10px; padding: 8px 12px; font-size: 0.85rem;
     }
-    .hof-row .pos  { color: var(--text-faint); min-width: 20px; }
+    .hof-row .pos  { display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-faint); min-width: 20px; }
+    .hof-row .pos .ico { width: 1.15rem; height: 1.15rem; }
     .hof-row .avatar, .rank-row .avatar { flex-shrink: 0; }
     .avatar-photo {
       display: block; border-radius: 50%; object-fit: cover;
@@ -365,18 +404,24 @@
     }
     .hof-row .nick { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hof-row .pts  { font-family: var(--font-mono); color: var(--secondary); font-weight: 700; white-space: nowrap; }
+    .hof-winner { display: inline-flex; align-items: center; gap: 5px; }
+    .hof-winner .ico { width: 0.9rem; height: 0.9rem; }
     .hof-empty { color: var(--text-faint); font-size: 0.8rem; }
   </style>
   <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
        internet, así que una dependencia externa aquí rompería el QR entero. -->
   <script src="/vendor/qrcode.min.js"></script>
+  <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
 </head>
 <body>
 
 <!-- Eje 4: aviso de reconexión -->
-<div class="reconnect-banner" id="reconnect-banner">🔄 Se perdió la conexión con el nodo, reconectando...</div>
+<div class="reconnect-banner" id="reconnect-banner">
+  <span data-silunet-icon="refresh"></span>
+  <span>Se perdió la conexión con el nodo, reconectando...</span>
+</div>
 
 <!-- Cuenta regresiva "3, 2, 1, ¡YA!" (COUNTDOWN del servidor, sincronizada) -->
 <div class="countdown-overlay" id="countdown-overlay">
@@ -404,10 +449,26 @@
 <!-- Panel didáctico: para que se VEA el sistema distribuido funcionando, no
      solo se confíe en que está ahí (Eje 2 + Eje 3 + Eje 4 en vivo). -->
 <div class="engine-strip" id="engine-strip">
-  <div class="engine-chip" title="Eje 2: reloj lógico de Lamport del coordinador">🕓 Lamport <b id="e-lamport">0</b></div>
-  <div class="engine-chip mutex" id="e-mutex-chip" title="Eje 3: candado FIFO del marcador compartido">🔒 Candado <b id="e-mutex">libre</b></div>
-  <div class="engine-chip election" id="e-election" title="Eje 4: algoritmo del Matón">🗳️ Eligiendo coordinador…</div>
+  <div class="engine-chip" title="Eje 2: reloj lógico de Lamport del coordinador">
+    <span data-silunet-icon="clock"></span> Lamport <b id="e-lamport">0</b>
+  </div>
+  <div class="engine-chip mutex" id="e-mutex-chip" title="Eje 3: candado FIFO del marcador compartido">
+    <span data-silunet-icon="lock"></span> Candado <b id="e-mutex">libre</b>
+  </div>
+  <div class="engine-chip election" id="e-election" title="Eje 4: algoritmo del Matón">
+    <span data-silunet-icon="network"></span> Eligiendo coordinador…
+  </div>
   <div class="engine-log" id="e-log">Eje 3: sin colisiones todavía en esta partida.</div>
+</div>
+
+<!-- Modo Relajo: reloj comunitario que solo se alarga cuando alguien acierta -->
+<div class="relajo-bar" id="relajo-bar">
+  <div class="relajo-dato">
+    <b class="relajo-clock" id="rj-clock">45</b>
+    <span>segundos para todos</span>
+  </div>
+  <div class="relajo-dato"><b id="rj-cleared">0</b><span>siluetas despejadas</span></div>
+  <div class="relajo-dato"><b class="relajo-bonus" id="rj-bonus">+2</b><span>s por acierto</span></div>
 </div>
 
 <main id="main-waiting" style="display:flex; align-items:center; justify-content:center; grid-template-columns:1fr;">
@@ -430,11 +491,11 @@
     <!-- v2.1: salón de la fama — histórico de TODAS las Casa Abierta jugadas -->
     <div class="hof-block" id="hof-block" style="display:none;">
       <div class="hof-col">
-        <p class="hof-title">🏆 Salón de la fama</p>
+        <p class="hof-title"><span data-silunet-icon="trophy"></span> Salón de la fama</p>
         <div class="hof-list" id="hof-top"></div>
       </div>
       <div class="hof-col">
-        <p class="hof-title">🕹️ Últimas partidas</p>
+        <p class="hof-title"><span data-silunet-icon="gamepad"></span> Últimas partidas</p>
         <div class="hof-list" id="hof-recent"></div>
       </div>
     </div>
@@ -491,12 +552,15 @@
     Estado: <span class="phase-badge" id="f-phase">Esperando</span>
   </div>
   <div class="ctrl-btns">
-    <input class="rounds-input" id="rounds-input" type="number" value="10" min="1" max="12" title="Número de rondas">
+    <input class="rounds-input" id="rounds-input" type="number" value="8" min="1" max="8" title="Número de rondas (máx. 8)">
     <button class="btn-start" id="btn-start" onclick="startGame()">Iniciar partida</button>
+    <button class="btn-start btn-relajo" id="btn-relajo" onclick="startGame('relajo')" title="Sin temáticas: todo mezclado y un reloj para todos">Modo Relajo</button>
   </div>
 </footer>
 
 <script>
+  const ICON = window.SilunetIcons;
+
   let totalTime   = 24;
 
   // QR/URL de unión: una sola lectura al cargar (no es polling de estado de juego).
@@ -527,12 +591,12 @@
     } else {
       el.innerHTML = nodes.map(n => {
         const cls  = (n.isCoordinator ? ' coord' : '') + (n.up ? '' : ' offline');
-        const star = n.isCoordinator ? `<span class="star" title="Coordinador">★</span>` : '';
+        const roleIcon = n.isCoordinator ? `<span class="node-role-icon" title="Coordinador" aria-label="Coordinador">${ICON.crown()}</span>` : '';
         return `<div class="node-dot${cls}" title="${n.up ? 'Activo' : 'Caído'}">`
-             + `<span class="dot ${n.up ? 'ok' : 'down'}"></span>${star}${n.id}</div>`;
+             + `<span class="dot ${n.up ? 'ok' : 'down'}"></span>${roleIcon}${n.id}</div>`;
       }).join('');
     }
-    // Panel didáctico (Eje 4): "🗳️ Eligiendo coordinador..." mientras dura la
+    // Panel didáctico (Eje 4): "Eligiendo coordinador..." mientras dura la
     // elección Bully — normalmente es tan rápida que apenas se alcanza a ver.
     document.getElementById('e-election').classList.toggle('show', !!electionInProgress);
   }
@@ -560,7 +624,7 @@
   }
 
   function handleMutexQueued(msg) {
-    pushEngineLog(`🔒 Eje 3: acierto encolado (${msg.waiting} en espera) — dos llegaron casi a la vez`);
+    pushEngineLog(`Eje 3: acierto encolado (${msg.waiting} en espera) — dos llegaron casi a la vez`);
     // deja el chip en rojo un momento más para que se alcance a ver, aunque
     // el candado ya se haya liberado por dentro (dura milisegundos).
     const chip = document.getElementById('e-mutex-chip');
@@ -577,11 +641,11 @@
     if (top.length === 0 && recent.length === 0) { block.style.display = 'none'; return; }
     block.style.display = 'flex';
 
-    const medals = ['🥇', '🥈', '🥉'];
+    const medalClasses = ['ico-gold', 'ico-silver', 'ico-bronze'];
     document.getElementById('hof-top').innerHTML = top.length
       ? top.map((e, i) => `
           <div class="hof-row">
-            <span class="pos">${medals[i] ?? '#' + (i + 1)}</span>
+            <span class="pos">${i < 3 ? ICON.medalNum(i + 1, medalClasses[i]) : '#' + (i + 1)}</span>
             ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '22px', '')}
             <span class="nick">${e.nick}</span>
             <span class="pts">${e.puntosAcumulados} pts</span>
@@ -591,7 +655,7 @@
     document.getElementById('hof-recent').innerHTML = recent.length
       ? recent.map(g => {
           const fecha = new Date(g.jugadaEn).toLocaleDateString('es', { day: '2-digit', month: 'short' });
-          const ganador = g.ganador ? `🏅 ${g.ganador}` : 'sin ganador';
+          const ganador = g.ganador ? `<span class="hof-winner">${ICON.medal('ico-gold')}${g.ganador}</span>` : 'sin ganador';
           return `
           <div class="hof-row" style="flex-direction:column; align-items:flex-start; gap:2px;">
             <span class="nick">${g.nombre}</span>
@@ -661,11 +725,12 @@
       case 'COUNTDOWN':      handleCountdown(msg);     break;
       case 'ROUND_START':    handleRoundStart(msg);    break;
       case 'TICK':           handleTick(msg);          break;
+      case 'SHARED_CLOCK':   handleSharedClock(msg);   break;
       case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
       case 'ROUND_END':      handleRoundEnd(msg);      break;
       case 'RANKING':        handleRanking(msg);       break;
       case 'CLUSTER_STATE':  renderNodes(msg.nodes, msg.electionInProgress); break;
-      case 'PLAYER_LEFT':    showNotif(`🔌 ${msg.nick}: Desconectado`, 4000); break;
+      case 'PLAYER_LEFT':    showNotif(`${msg.nick}: Desconectado`, 4000); break;
       case 'ENGINE_STATE':   handleEngineState(msg);   break;
       case 'MUTEX_QUEUED':   handleMutexQueued(msg);   break;
       case 'HALL_OF_FAME':   handleHallOfFame(msg);    break;
@@ -704,7 +769,19 @@
       </div>`;
   }
 
+  // Modo Relajo: el reloj comunitario. Aparece su barra y se oculta al terminar.
+  function handleSharedClock(msg) {
+    const bar = document.getElementById('relajo-bar');
+    bar.classList.add('show');
+    const clock = document.getElementById('rj-clock');
+    clock.textContent = msg.secondsLeft;
+    clock.classList.toggle('critico', msg.secondsLeft <= 10);
+    document.getElementById('rj-cleared').textContent = msg.cleared;
+    document.getElementById('rj-bonus').textContent = '+' + msg.bonusPerSolver;
+  }
+
   function handleVoteStart(msg) {
+    document.getElementById('relajo-bar').classList.remove('show');
     document.getElementById('mv-winner').textContent = '';
     document.getElementById('mv-total').textContent  = '0 votos';
     document.getElementById('mv-diff-total').textContent = '0 votos';
@@ -746,7 +823,7 @@
 
   function handleVoteResult(msg) {
     document.getElementById('mv-winner').textContent =
-      `🎉 ¡${msg.winner} · ${msg.difficultyLabel || msg.difficulty}!`;
+      `¡${msg.winner} · ${msg.difficultyLabel || msg.difficulty}!`;
     AudioFX.correct();
   }
 
@@ -835,6 +912,7 @@
       setPhase('gameEnd');
       document.getElementById('btn-start').disabled = false;
       document.getElementById('btn-start').textContent = 'Nueva partida';
+      document.getElementById('btn-relajo').disabled = false;
       AudioFX.gameEnd();
       // v2.1: la partida que acaba de terminar ya se persistió en la DB del
       // coordinador (game_over corre síncrono ahí) -> refresca el histórico.
@@ -847,14 +925,18 @@
       returnToWaitingTimer = setTimeout(() => {
         document.getElementById('main-game').style.display    = 'none';
         document.getElementById('main-waiting').style.display = 'flex';
+        // El reloj comunitario pertenece a la partida: al volver a la pantalla
+        // de espera se oculta, si no queda marcando 0s indefinidamente.
+        document.getElementById('relajo-bar').classList.remove('show');
       }, 10000);
     }
   }
 
-  function startGame() {
-    const rounds = parseInt(document.getElementById('rounds-input').value) || 10;
-    send({ type: 'START_GAME', totalRounds: rounds });
+  function startGame(mode) {
+    const rounds = parseInt(document.getElementById('rounds-input').value) || 8;
+    send({ type: 'START_GAME', totalRounds: rounds, mode: mode || 'clasico' });
     document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-relajo').disabled = true;
   }
 
   // ── UI helpers ─────────────────────────────────────────────────────────────
@@ -881,13 +963,13 @@
   }
   function clearNotif() { document.getElementById('m-notif').textContent = ''; }
 
-  const medals = ['🥇', '🥈', '🥉'];
+  const medalClasses = ['ico-gold', 'ico-silver', 'ico-bronze'];
   const topClass = ['top1', 'top2', 'top3'];
 
   function renderRanking(entries) {
     document.getElementById('m-ranking').innerHTML = entries.map((e, i) =>
       `<div class="rank-row ${topClass[i] ?? ''}">
-        <span class="rank-pos">${medals[i] ?? '#' + (i+1)}</span>
+        <span class="rank-pos">${i < 3 ? ICON.medalNum(i + 1, medalClasses[i]) : '#' + (i+1)}</span>
         ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '28px', '')}
         <span class="rank-nick">${e.nick}</span>
         <span class="rank-score">${e.score} pts</span>

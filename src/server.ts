@@ -31,7 +31,7 @@ const store: PersistenceStore = DATABASE_URL
   : new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
 
 if (!DATABASE_URL && PEER_URLS.length > 0 && ALLOW_SQLITE_CLUSTER) {
-  console.warn(`[${NODE_ID}] ⚠ DATABASE_URL ausente: SQLite es solo para desarrollo; el historial NO será consistente entre nodos.`);
+  console.warn(`[${NODE_ID}] [WARN] DATABASE_URL ausente: SQLite es solo para desarrollo; el historial NO será consistente entre nodos.`);
 }
 
 const AVATAR_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -277,7 +277,7 @@ async function persistGameResult(result: GameOverResult): Promise<void> {
   try {
     const saved = await store.saveGameResult(result);
     pendingGameResults.delete(result.gameId);
-    console.log(`[${NODE_ID}] 💾 "${saved.name}" persistida (partida ${saved.number}, ${saved.savedPlayers} jugadores)`);
+    console.log(`[${NODE_ID}] [DB] "${saved.name}" persistida (partida ${saved.number}, ${saved.savedPlayers} jugadores)`);
   } catch (error) {
     console.error(`[${NODE_ID}] No se pudo persistir la partida ${result.gameId}; se reintentará:`, error);
   }
@@ -318,7 +318,7 @@ async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): P
     if (!cluster.isCoordinator) return false;
     try {
       if (await store.claimLeadership()) {
-        console.log(`[${NODE_ID}] ✓ Concesión de escritura ${store.mode} adquirida`);
+        console.log(`[${NODE_ID}] [OK] Concesión de escritura ${store.mode} adquirida`);
         return true;
       }
     } catch (error) {
@@ -330,7 +330,7 @@ async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): P
 }
 
 async function activateCoordinator(): Promise<void> {
-  console.log(`[${NODE_ID}] ★ Coordinador electo; validando la concesión de persistencia`);
+  console.log(`[${NODE_ID}] [COORDINATOR] Coordinador electo; validando la concesión de persistencia`);
   const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
   if (!acquired) {
     console.error(`[${NODE_ID}] No se obtuvo la concesión de escritura; la partida no se reanudará todavía`);
@@ -430,7 +430,7 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía START_GAME del master
     case 'N_FORWARD_START':
       if (!cluster.isCoordinator) return;
-      game.startGame(msg.totalRounds ?? 10);
+      game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
       break;
 
     // Seguidor reenvía el voto (categoría o dificultad) de su jugador al coordinador
@@ -512,9 +512,9 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
   }
 });
 
-cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] ✓ Peer listo: ${id}`));
-cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] ✗ Peer caído: ${id}`));
-cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] ⚠ Heartbeat perdido de ${id} (Eje 4)`));
+cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] [OK] Peer listo: ${id}`));
+cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] [DOWN] Peer caído: ${id}`));
+cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] [WARN] Heartbeat perdido de ${id} (Eje 4)`));
 
 // Eje 4: cuando el coordinador (el que sea, ahora o tras un failover) pierde un
 // nodo, cualquier jugador cuyo WebSocket vivía ahí queda "fantasma" (ver
@@ -656,6 +656,12 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           if (game.getPhase() !== 'waiting') {
             send(ws, { type: 'RANKING', entries: game.getRanking(), final: false });
           }
+          // Un master que llega (o recarga) a mitad de partida debe ver la ronda
+          // en curso, no la pantalla de espera: se le manda el estado actual.
+          const roundInfo = game.getCurrentRoundInfo();
+          if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
+          const reloj = game.sharedClockState();
+          if (reloj) send(ws, { type: 'SHARED_CLOCK', ...reloj });
         }
         // En seguidor, el master recibirá actualizaciones vía los próximos N_BROADCAST
         break;
@@ -697,11 +703,12 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       case 'START_GAME': {
         if (client.role !== 'master') return;
         if (cluster.isCoordinator) {
-          game.startGame(msg.totalRounds ?? 10);
+          game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
         } else {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_START',
-            totalRounds: msg.totalRounds ?? 10,
+            totalRounds: msg.totalRounds ?? 8,
+            mode:       msg.mode ?? 'clasico',
             lamport:    game.clock.tick(),
           });
         }
@@ -805,7 +812,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [ws, meta] of clients) {
     if (meta.role === 'player' && meta.lastSeen && now - meta.lastSeen > CLIENT_TIMEOUT_MS) {
-      console.log(`[${NODE_ID}] ⚠ Cliente ${meta.playerId} sin latido (${now - meta.lastSeen}ms) -> baja`);
+      console.log(`[${NODE_ID}] [WARN] Cliente ${meta.playerId} sin latido (${now - meta.lastSeen}ms) -> baja`);
       ws.terminate(); // dispara 'close' -> removePlayer / N_PLAYER_LEFT + PLAYER_LEFT
     }
   }

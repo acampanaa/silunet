@@ -4,6 +4,12 @@
 // -> ventana de la cuenta regresiva "3, 2, 1, ¡YA!" (sincroniza al público).
 export type GamePhase = 'waiting' | 'voting' | 'countdown' | 'playing' | 'roundEnd' | 'gameEnd';
 
+// 'clasico': rondas fijas, con votación de temática y dificultad.
+// 'relajo' : sin votación ni temáticas — el banco completo mezclado y un
+//            RELOJ COMPARTIDO por todo el público que solo se alarga cuando
+//            alguien acierta. Termina cuando ese reloj llega a cero.
+export type GameMode = 'clasico' | 'relajo';
+
 export interface Player {
   id: string;
   nick: string;
@@ -133,6 +139,11 @@ export interface GameSnapshot {
   difficultyVotes: Record<string, string>;
   voteCategories: string[];
   pendingTotalRounds: number;
+  // Palabras de partidas recientes, para no repetirlas en la siguiente.
+  recentWords: string[];
+  mode: GameMode;
+  sharedClock: number;
+  cleared: number;
 }
 
 // Mensajes servidor → cliente
@@ -165,6 +176,9 @@ export type S2C =
   | { type: 'COUNTDOWN'; value: number }
   | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
+  // Modo Relajo: pulso del reloj comunitario. `cleared` es el contador de
+  // siluetas que el grupo lleva despejadas (el récord que intenta batir).
+  | { type: 'SHARED_CLOCK'; secondsLeft: number; cleared: number; bonusPerSolver: number }
   | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number; usedHint: boolean }
   | { type: 'HINT_RESULT'; status: 'revealed' | 'locked' | 'unavailable'; hint?: string; secondsLeft?: number; penaltyPercent?: number; alreadyUsed?: boolean }
   | { type: 'WRONG_ANSWER' }
@@ -203,7 +217,7 @@ export type N2N =
   | { type: 'N_FORWARD_CUSTOM_AVATAR'; playerId: string; token: string; dataUrl: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
-  | { type: 'N_FORWARD_START'; totalRounds: number; lamport: number }
+  | { type: 'N_FORWARD_START'; totalRounds: number; mode: GameMode; lamport: number }
   // Votación de categoría: seguidor reenvía el voto de su jugador al coordinador
   | { type: 'N_FORWARD_VOTE';  playerId: string; kind: 'category' | 'difficulty'; option: string; originNode: string; lamport: number }
   // v2: seguidor pide al coordinador el perfil de un jugador (solo el coord. tiene DB)
@@ -222,7 +236,7 @@ export type C2S =
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'REQUEST_HINT' }
-  | { type: 'START_GAME'; totalRounds?: number }
+  | { type: 'START_GAME'; totalRounds?: number; mode?: GameMode }
   // Voto de categoría o de dificultad — uno de cada por jugador, se puede cambiar
   | { type: 'CAST_VOTE'; kind: 'category' | 'difficulty'; option: string }
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente

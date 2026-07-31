@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
-import { GamePhase, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty } from './types';
-import { getRandomRounds, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
+import { GamePhase, GameMode, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty } from './types';
+import { getRandomRounds, getMixedQueue, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
 
@@ -10,6 +10,33 @@ const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
 const GAP_BETWEEN  = 4;   // segundos entre rondas
 const COUNTDOWN_FROM = 3; // "3, 2, 1, ¡YA!" antes de que arranque el timer real
 const VOTE_SECONDS = 8;   // ventana para que los jugadores voten la categoría
+// Cuántas palabras recuerda el juego entre partidas para no repetirlas.
+// Cubre varias partidas seguidas de la misma combinación temática+dificultad.
+const RECENT_WORDS_MEMORY = 60;
+
+// ── Modo Relajo (reloj compartido) ───────────────────────────────────────────
+// Un único cronómetro para TODO el público: solo se alarga cuando alguien
+// acierta, y la partida muere cuando llega a cero. La bonificación depende de
+// CUÁNTA gente acertó (no de quién llegó primero), para que sea cooperativo de
+// verdad: te conviene que todos adivinen, no solo tú.
+const RELAJO_START_SECONDS   = 45; // reloj inicial
+const RELAJO_ROUND_SECONDS   = 20; // tope por silueta si nadie acierta
+const RELAJO_ADVANCE_AFTER   = 3;  // s tras el primer acierto antes de pasar a la siguiente
+const RELAJO_BONUS_PER_SOLVER = 2;  // s que suma CADA persona que acierta
+
+// Tope de bonificación por silueta, que DECAE con las despejadas. Es el motor
+// del modo: mientras el tope supere el costo de un ciclo (avance 3s + pausa 1s
+// = 4s), un público numeroso hace crecer el reloj; cuando cae por debajo, la
+// partida entra en cuenta atrás irreversible por más que acierten todos.
+// Sin esta decadencia la partida no termina nunca: con 6 jugadores rápidos el
+// reloj crecía indefinidamente.
+const RELAJO_BONUS_CAP_START = 10;
+// 0 a propósito: al final de la partida ningún acierto suma tiempo, y ahí el
+// reloj cae sin remedio. Con mínimo 1 el primer acierto seguía sumando 2s y
+// casi cubría el ciclo, estirando la partida a ~4 minutos.
+const RELAJO_BONUS_CAP_MIN   = 0;
+const RELAJO_QUEUE_SIZE      = 40; // siluetas que se preparan por tanda
+const RELAJO_GAP_BETWEEN     = 1;  // pausa entre siluetas (el clásico usa 4)
 
 // Eje 2+3: el puntaje depende de la POSICIÓN LÓGICA de llegada (orden de Lamport
 // resuelto por el coordinador), NO del tiempo ni de la latencia de red del celular.
@@ -30,6 +57,16 @@ export class Game extends EventEmitter {
   private round?: RoundState;
   private timer?: ReturnType<typeof setInterval>;
   private countdownTimer?: ReturnType<typeof setTimeout>;
+
+  // Palabras usadas en partidas anteriores (de la más antigua a la más reciente),
+  // para no repetirlas en la siguiente. Viaja en el snapshot para que un
+  // coordinador promovido por Bully no pierda la memoria (Eje 4).
+  private recentWords: string[] = [];
+
+  // Modo de juego y estado propio del modo Relajo.
+  private mode: GameMode = 'clasico';
+  private sharedClock = 0;   // segundos que le quedan de vida a la partida
+  private cleared = 0;       // siluetas despejadas por el grupo
 
   // Votación de categoría (fase 'voting'): un jugador puede cambiar su voto
   // mientras dure la ventana, por eso es un mapa (no un contador directo).
@@ -103,6 +140,10 @@ export class Game extends EventEmitter {
       difficultyVotes:   Object.fromEntries(this.difficultyVotes),
       voteCategories:    this.voteCategories,
       pendingTotalRounds: this.pendingTotalRounds,
+      recentWords:       this.recentWords,
+      mode:              this.mode,
+      sharedClock:       this.sharedClock,
+      cleared:           this.cleared,
     };
   }
 
@@ -126,6 +167,10 @@ export class Game extends EventEmitter {
     this.difficultyVotes   = new Map(Object.entries(s.difficultyVotes ?? {}));
     this.voteCategories    = s.voteCategories ?? [];
     this.pendingTotalRounds = s.pendingTotalRounds ?? 10;
+    this.recentWords       = s.recentWords ?? [];
+    this.mode              = s.mode ?? 'clasico';
+    this.sharedClock       = s.sharedClock ?? 0;
+    this.cleared           = s.cleared ?? 0;
   }
 
   /**
@@ -143,7 +188,7 @@ export class Game extends EventEmitter {
       // failover) -> salta directo a jugar con el timeLeft que ya tenía.
       this.startRoundTimer();
     } else if (this.phase === 'roundEnd') {
-      setTimeout(() => this.nextRound(), GAP_BETWEEN * 1000);
+      setTimeout(() => this.nextRound(), this.gapBetweenRounds() * 1000);
     } else if (this.phase === 'voting') {
       // Igual que con la cuenta regresiva: no reinicia la ventana de votación
       // desde cero (ya es bastante desincronización con el propio failover) ->
@@ -279,10 +324,14 @@ export class Game extends EventEmitter {
    * votos independientes en la misma ventana. beginRounds() (llamado al cerrar
    * la votación) es quien de verdad arranca las rondas.
    */
-  startGame(totalRounds = 10): boolean {
+  startGame(totalRounds = 10, mode: GameMode = 'clasico'): boolean {
     if (this.phase !== 'waiting' && this.phase !== 'gameEnd') return false;
     if (this.timer) clearInterval(this.timer);
     if (this.countdownTimer) clearTimeout(this.countdownTimer);
+    this.mode = mode;
+
+    // Relajo: sin temáticas ni dificultad que votar -> arranca de una.
+    if (mode === 'relajo') { this.beginRelajo(); return true; }
 
     this.pendingTotalRounds = totalRounds;
     this.votes.clear();
@@ -364,14 +413,74 @@ export class Game extends EventEmitter {
     this.beginRounds(this.pendingTotalRounds, [winner], difficulty);
   }
 
-  private beginRounds(totalRounds: number, categories: string[], difficulty: Difficulty) {
-    // Purga a quien se quedó desconectado de la partida anterior sin volver:
-    // una partida nueva es el corte natural de la ventana de reconexión.
+  /** Arranca el modo Relajo: banco completo mezclado y reloj comunitario. */
+  private beginRelajo() {
+    this.resetPlayersForNewGame();
+    // Sin filtro de temática ni dificultad: las 160 palabras revueltas.
+    this.rounds = getMixedQueue(RELAJO_QUEUE_SIZE, this.recentWords);
+    this.recentWords = [...this.recentWords, ...this.rounds.map(r => r.word)].slice(-RECENT_WORDS_MEMORY);
+    this.currentGameId = randomUUID();
+    this.pendingGameOverResult = undefined;
+    this.currentRoundIndex = -1;
+    this.sharedClock = RELAJO_START_SECONDS;
+    this.cleared = 0;
+    this.broadcastSharedClock();
+    this.nextRound();
+  }
+
+  /** Pausa entre siluetas según el modo. */
+  private gapBetweenRounds(): number {
+    return this.mode === 'relajo' ? RELAJO_GAP_BETWEEN : GAP_BETWEEN;
+  }
+
+  /** Duración de una silueta según el modo. */
+  private roundSeconds(): number {
+    return this.mode === 'relajo' ? RELAJO_ROUND_SECONDS : TOTAL_TIME;
+  }
+
+  private bonusPerSolver(): number { return RELAJO_BONUS_PER_SOLVER; }
+
+  /** Tope de segundos que puede ganar UNA silueta. Baja 1s cada 2 despejadas. */
+  private bonusCap(): number {
+    return Math.max(RELAJO_BONUS_CAP_MIN, RELAJO_BONUS_CAP_START - this.cleared);
+  }
+
+  /** Estado del reloj comunitario, para re-sincronizar a quien llega tarde. */
+  sharedClockState(): { secondsLeft: number; cleared: number; bonusPerSolver: number } | null {
+    if (this.mode !== 'relajo') return null;
+    return {
+      secondsLeft: Math.max(0, this.sharedClock),
+      cleared: this.cleared,
+      bonusPerSolver: this.bonusPerSolver(),
+    };
+  }
+
+  private broadcastSharedClock() {
+    this.broadcast({
+      type: 'SHARED_CLOCK',
+      secondsLeft: Math.max(0, this.sharedClock),
+      cleared: this.cleared,
+      bonusPerSolver: this.bonusPerSolver(),
+    });
+  }
+
+  /** Purga desconectados y pone a cero los puntajes. Común a los dos modos. */
+  private resetPlayersForNewGame() {
     for (const [id, p] of [...this.players]) {
       if (p.connected === false) this.players.delete(id);
       else p.score = 0;
     }
-    this.rounds = getRandomRounds(totalRounds, categories, difficulty);
+  }
+
+  private beginRounds(totalRounds: number, categories: string[], difficulty: Difficulty) {
+    // Purga a quien se quedó desconectado de la partida anterior sin volver:
+    // una partida nueva es el corte natural de la ventana de reconexión.
+    this.resetPlayersForNewGame();
+    this.rounds = getRandomRounds(totalRounds, categories, difficulty, this.recentWords);
+    // Memoria entre partidas: evita que dos partidas seguidas repitan el mismo
+    // set de palabras. El pool de una combinación votada puede ser de 6-8, así
+    // que sin esto la partida siguiente salía casi idéntica.
+    this.recentWords = [...this.recentWords, ...this.rounds.map(r => r.word)].slice(-RECENT_WORDS_MEMORY);
     this.currentGameId = randomUUID();
     this.pendingGameOverResult = undefined;
     this.currentRoundIndex = -1;
@@ -381,8 +490,15 @@ export class Game extends EventEmitter {
   private nextRound() {
     this.currentRoundIndex++;
     if (this.currentRoundIndex >= this.rounds.length) {
-      this.endGame();
-      return;
+      // Relajo no termina por quedarse sin siluetas: solo el reloj lo mata.
+      if (this.mode === 'relajo') {
+        this.rounds = getMixedQueue(RELAJO_QUEUE_SIZE, this.recentWords);
+        this.recentWords = [...this.recentWords, ...this.rounds.map(r => r.word)].slice(-RECENT_WORDS_MEMORY);
+        this.currentRoundIndex = 0;
+      } else {
+        this.endGame();
+        return;
+      }
     }
 
     const entry = this.rounds[this.currentRoundIndex];
@@ -399,8 +515,8 @@ export class Game extends EventEmitter {
       hiddenWord:    chars.map(c => (c === ' ' ? ' ' : '_')),
       revealOrder,
       revealedCount: 0,
-      timeLeft:      TOTAL_TIME,
-      totalTime:     TOTAL_TIME,
+      timeLeft:      this.roundSeconds(),
+      totalTime:     this.roundSeconds(),
       solvers:       [],
       hintedPlayerIds: [],
     };
@@ -418,7 +534,14 @@ export class Game extends EventEmitter {
       hiddenWord:  this.round.hiddenWord.join(' '),
     });
 
-    this.runCountdown(COUNTDOWN_FROM);
+    // Relajo va al ritmo del reloj comunitario: la cuenta regresiva completa
+    // solo tiene sentido al arrancar. Entre siluetas se entra directo, si no
+    // se pierden ~7s de los 45 en cada cambio.
+    if (this.mode === 'relajo' && this.cleared + this.currentRoundIndex > 0) {
+      this.startRoundTimer();
+    } else {
+      this.runCountdown(COUNTDOWN_FROM);
+    }
   }
 
   /** "3, 2, 1, ¡YA!" — al llegar a 0 arranca el timer real (mismo instante). */
@@ -451,6 +574,14 @@ export class Game extends EventEmitter {
   private tick() {
     if (!this.round) return;
     this.round.timeLeft--;
+
+    // Modo Relajo: el reloj comunitario corre SIEMPRE y es el que mata la
+    // partida. La silueta actual solo marca cuándo pasar a la siguiente.
+    if (this.mode === 'relajo') {
+      this.sharedClock--;
+      this.broadcastSharedClock();
+      if (this.sharedClock <= 0) { this.endRelajo(); return; }
+    }
 
     // Revelar una letra en los múltiplos de REVEAL_EVERY (excepto en 0, ya que ahí termina)
     const shouldReveal =
@@ -529,6 +660,23 @@ export class Game extends EventEmitter {
         // Posición provisional de llegada (orden lógico hasta este instante).
         const position = this.round.solvers.length;
 
+        // Modo Relajo: cada acierto alarga el reloj de TODOS. Esta suma ocurre
+        // dentro del candado (Eje 3) junto con el registro del acierto: si dos
+        // personas aciertan a la vez, ambas bonificaciones se aplican una sola
+        // vez cada una, sin perderse (lost update) ni duplicarse.
+        if (this.mode === 'relajo') {
+          const yaSumado = (position - 1) * this.bonusPerSolver();
+          if (yaSumado < this.bonusCap()) {
+            this.sharedClock += this.bonusPerSolver();
+          }
+          // Primer acierto: se acorta la silueta para dar paso a la siguiente,
+          // pero deja una ventana para que los demás también sumen tiempo.
+          if (position === 1 && this.round.timeLeft > RELAJO_ADVANCE_AFTER) {
+            this.round.timeLeft = RELAJO_ADVANCE_AFTER;
+          }
+          this.broadcastSharedClock();
+        }
+
         // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
         this.broadcast({
           type: 'CORRECT_ANSWER',
@@ -557,6 +705,13 @@ export class Game extends EventEmitter {
     const ordered = [...this.round.solvers].sort((a, b) => a.lamport - b.lamport);
     const N = ordered.length;
 
+    // Relajo: la silueta cuenta como despejada si alguien la sacó. Es el
+    // marcador colectivo que el grupo intenta batir.
+    if (this.mode === 'relajo' && N > 0) {
+      this.cleared++;
+      this.broadcastSharedClock();
+    }
+
     const solvers = ordered.map((s, i) => {
       const position = i + 1;
       const rawPoints = Math.round(POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (position - 1) / N));
@@ -579,7 +734,23 @@ export class Game extends EventEmitter {
     this.broadcast({ type: 'ROUND_END', word: this.round.wordEntry.word, solvers });
     this.broadcastRanking(false);
 
-    setTimeout(() => this.nextRound(), GAP_BETWEEN * 1000);
+    setTimeout(() => this.nextRound(), this.gapBetweenRounds() * 1000);
+  }
+
+  /** Cierra el modo Relajo: se acabó el reloj comunitario. */
+  private endRelajo() {
+    if (this.timer) clearInterval(this.timer);
+    this.sharedClock = 0;
+    this.broadcastSharedClock();
+    // Revela la palabra que quedó a medias antes de mostrar el marcador final.
+    if (this.round) {
+      this.broadcast({
+        type: 'ROUND_END',
+        word: this.round.wordEntry.word,
+        solvers: [],
+      });
+    }
+    this.endGame();
   }
 
   private endGame() {

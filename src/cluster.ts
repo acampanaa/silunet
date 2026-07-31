@@ -200,7 +200,7 @@ export class Cluster extends EventEmitter {
 
   private becomeCoordinator() {
     if (this.isCoordinator) return;
-    console.log(`[${this.nodeId}] ★ Me proclamo COORDINADOR (Bully)`);
+    console.log(`[${this.nodeId}] [COORDINATOR] Me proclamo COORDINADOR (Bully)`);
     this.coordinatorId = this.nodeId;
     this.clearElectionTimers();
     this.electionInProgress = false;

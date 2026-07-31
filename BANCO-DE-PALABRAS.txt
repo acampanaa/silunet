@@ -1,0 +1,307 @@
+==============================================================================
+SILUNET - TEMATICAS Y BANCO DE PALABRAS
+PUCE Sede Manabi - Ingenieria de Software
+==============================================================================
+
+Total: 160 palabras en 8 tematicas.
+
+La dificultad se deriva del largo de la palabra (no se anota a mano):
+  FACIL       = 5 letras o menos
+  INTERMEDIO  = 6 a 8 letras
+  DIFICIL     = 9 letras o mas
+
+Los jugadores votan tematica Y dificultad antes de cada partida, asi que
+cada combinacion define el pool de palabras de esa partida.
+
+[*] = silueta ya dibujada    [ ] = usa placeholder, falta ilustrar
+
+------------------------------------------------------------------------------
+RESUMEN POR TEMATICA
+------------------------------------------------------------------------------
+
+  TEMATICA           TOTAL   FACIL   INTERM.   DIFICIL   ILUSTRADAS
+  Computadores        20       6        8         6        11/20
+  Redes               20       6        8         6        10/20
+  Dispositivos        20       6        8         6        10/20
+  Almacenamiento      20       6        8         6         6/20
+  Animales            20       6        8         6         0/20
+  Comida              20       6        8         6         0/20
+  Transporte          20       6        8         6         0/20
+  Instrumentos        20       6        8         6         0/20
+
+
+==============================================================================
+  COMPUTADORES
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] CHIP          (4 letras)   pista: Es una pieza diminuta que puede realizar millones de operaciones.
+    [*] RATON         (5 letras)   pista: Se desplaza sobre una superficie para controlar el puntero.
+    [ ] PLACA         (5 letras)   pista: Sirve como base para conectar los componentes internos.
+    [ ] TECLA         (5 letras)   pista: Cada una representa una entrada que se presiona con los dedos.
+    [ ] BOTON         (5 letras)   pista: Activa una acción cuando se presiona.
+    [ ] PIXEL         (5 letras)   pista: Es la unidad de color más pequeña que ves en una pantalla.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [*] LAPTOP        (6 letras)   pista: Combina pantalla y teclado en un equipo que se puede transportar.
+    [ ] WEBCAM        (6 letras)   pista: Captura video para llamadas y transmisiones desde un equipo.
+    [*] MONITOR       (7 letras)   pista: Muestra de forma visual lo que procesa el equipo.
+    [*] TECLADO       (7 letras)   pista: Permite escribir mediante un conjunto ordenado de piezas.
+    [*] MEMORIA       (7 letras)   pista: Mantiene datos disponibles mientras se realizan tareas.
+    [*] PARLANTE      (8 letras)   pista: Convierte señales eléctricas en sonido audible.
+    [*] JOYSTICK      (8 letras)   pista: Se inclina en distintas direcciones para controlar movimientos.
+    [ ] PANTALLA      (8 letras)   pista: Es la superficie donde aparecen imágenes, texto y video.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] IMPRESORA     (9 letras)   pista: Pasa información digital a una hoja física.
+    [*] PROYECTOR     (9 letras)   pista: Amplía una imagen y la lanza sobre una superficie.
+    [ ] MICROCHIP     (9 letras)   pista: Concentra circuitos electrónicos en una pieza muy pequeña.
+    [ ] ORDENADOR     (9 letras)   pista: Procesa instrucciones y datos para ejecutar programas.
+    [*] VENTILADOR    (10 letras)   pista: Mueve aire para evitar que los componentes se calienten.
+    [ ] PROCESADOR    (10 letras)   pista: Ejecuta las instrucciones principales de un sistema.
+
+
+==============================================================================
+  REDES
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] NUBE          (4 letras)   pista: Permite usar recursos remotos a través de internet.
+    [*] WIFI          (4 letras)   pista: Conecta dispositivos sin necesidad de cables.
+    [*] MODEM         (5 letras)   pista: Adapta la señal del proveedor para dar acceso a internet.
+    [*] CABLE         (5 letras)   pista: Transporta señales mediante una conexión física.
+    [*] TORRE         (5 letras)   pista: Eleva equipos de comunicación para ampliar su alcance.
+    [ ] FIBRA         (5 letras)   pista: Transporta información mediante pulsos de luz.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [*] ROUTER        (6 letras)   pista: Decide por dónde enviar los datos entre varias conexiones.
+    [*] ANTENA        (6 letras)   pista: Emite o recibe señales a través del aire.
+    [*] SWITCH        (6 letras)   pista: Une varios equipos dentro de una misma red local.
+    [ ] PAQUETE       (7 letras)   pista: Es una pequeña porción de información enviada por la red.
+    [*] SERVIDOR      (8 letras)   pista: Ofrece recursos o servicios a otros equipos.
+    [*] SATELITE      (8 letras)   pista: Retransmite señales desde una órbita alrededor del planeta.
+    [ ] FIREWALL      (8 letras)   pista: Filtra conexiones para bloquear tráfico no permitido.
+    [ ] ETHERNET      (8 letras)   pista: Es una tecnología común para redes locales por conexión física.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] PROTOCOLO     (9 letras)   pista: Define las reglas que permiten comunicarse a dos sistemas.
+    [ ] REPETIDOR     (9 letras)   pista: Recibe una señal debilitada y la vuelve a transmitir.
+    [ ] ENRUTADOR     (9 letras)   pista: Selecciona el camino que seguirán los datos.
+    [ ] NAVEGADOR     (9 letras)   pista: Interpreta sitios y permite recorrer contenido de internet.
+    [ ] CONMUTADOR    (10 letras)   pista: Envía datos al puerto correcto dentro de una red local.
+    [ ] CORTAFUEGOS   (11 letras)   pista: Actúa como una barrera que inspecciona el tráfico digital.
+
+
+==============================================================================
+  DISPOSITIVOS
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] DRON          (4 letras)   pista: Puede volar sin llevar un piloto en su interior.
+    [ ] FOCO          (4 letras)   pista: Produce iluminación al recibir energía.
+    [*] RELOJ         (5 letras)   pista: Sirve para consultar y medir el paso del tiempo.
+    [ ] RADIO         (5 letras)   pista: Recibe transmisiones de audio enviadas a distancia.
+    [ ] MANDO         (5 letras)   pista: Permite controlar un aparato desde cierta distancia.
+    [ ] CASCO         (5 letras)   pista: Se coloca sobre la cabeza como protección o accesorio tecnológico.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [*] CAMARA        (6 letras)   pista: Captura escenas y las convierte en imágenes.
+    [*] LENTES        (6 letras)   pista: Se colocan frente a los ojos para mejorar o ampliar la visión.
+    [*] TIMBRE        (6 letras)   pista: Emite un aviso cuando alguien lo acciona.
+    [ ] ALARMA        (6 letras)   pista: Advierte de una situación mediante sonido o luz.
+    [ ] SENSOR        (6 letras)   pista: Detecta cambios del entorno y los convierte en datos.
+    [*] CONTROL       (7 letras)   pista: Tiene botones para manejar otro equipo sin tocarlo directamente.
+    [ ] TABLETA       (7 letras)   pista: Es una superficie táctil portátil mayor que un teléfono.
+    [*] TELEFONO      (8 letras)   pista: Permite comunicarse a distancia y cabe en una mano.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] AUDIFONOS     (9 letras)   pista: Llevan el sonido directamente a los oídos.
+    [*] MICROFONO     (9 letras)   pista: Convierte la voz y otros sonidos en una señal.
+    [ ] TELEVISOR     (9 letras)   pista: Recibe y muestra contenido audiovisual.
+    [*] TERMOSTATO    (10 letras)   pista: Regula automáticamente la temperatura de un espacio.
+    [ ] SMARTWATCH    (10 letras)   pista: Se lleva en la muñeca y ejecuta funciones digitales.
+    [ ] ASPIRADORA    (10 letras)   pista: Retira polvo y residuos mediante succión.
+
+
+==============================================================================
+  ALMACENAMIENTO
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] USB           (3 letras)   pista: Es pequeño, portátil y se conecta directamente a un puerto.
+    [ ] RAM           (3 letras)   pista: Guarda temporalmente lo que el sistema está usando ahora.
+    [ ] ROM           (3 letras)   pista: Conserva instrucciones incluso cuando se corta la energía.
+    [*] DISCO         (5 letras)   pista: Guarda información sobre una superficie circular.
+    [*] CINTA         (5 letras)   pista: Almacena datos de forma secuencial en una banda magnética.
+    [ ] CACHE         (5 letras)   pista: Conserva datos frecuentes para acceder a ellos más rápido.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [ ] BACKUP        (6 letras)   pista: Es una copia preparada para recuperar información perdida.
+    [ ] SECTOR        (6 letras)   pista: Es una división pequeña dentro de una unidad de datos.
+    [*] TARJETA       (7 letras)   pista: Es un soporte delgado y removible usado en cámaras y teléfonos.
+    [ ] ARCHIVO       (7 letras)   pista: Agrupa información bajo un nombre dentro del sistema.
+    [ ] CARPETA       (7 letras)   pista: Sirve para organizar varios elementos digitales.
+    [ ] VOLUMEN       (7 letras)   pista: Es una unidad lógica que el sistema trata como espacio independiente.
+    [*] DISQUETE      (8 letras)   pista: Fue un soporte removible muy usado antes de las memorias modernas.
+    [ ] RESPALDO      (8 letras)   pista: Permite restaurar datos después de una pérdida o daño.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [*] DISCODURO     (9 letras)   pista: Guarda grandes cantidades de datos de manera permanente.
+    [ ] PARTICION     (9 letras)   pista: Divide una unidad física en espacios lógicos separados.
+    [ ] DIRECTORIO    (10 letras)   pista: Organiza elementos mediante una estructura jerárquica.
+    [ ] ALMACENAJE    (10 letras)   pista: Es la acción de conservar datos para utilizarlos después.
+    [ ] COMPRESION    (10 letras)   pista: Reduce el espacio que ocupa la información.
+    [ ] REPOSITORIO   (11 letras)   pista: Centraliza y conserva archivos o versiones de un proyecto.
+
+
+==============================================================================
+  ANIMALES
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] OSO           (3 letras)   pista: Es un mamífero grande que puede pasar el invierno en una guarida.
+    [ ] PEZ           (3 letras)   pista: Vive en el agua y respira mediante branquias.
+    [ ] GATO          (4 letras)   pista: Es un felino doméstico conocido por su agilidad.
+    [ ] PATO          (4 letras)   pista: Es un ave acuática con pico ancho y patas palmeadas.
+    [ ] LEON          (4 letras)   pista: Es un gran felino cuyo macho suele tener melena.
+    [ ] PERRO         (5 letras)   pista: Es un animal doméstico famoso por su lealtad.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [ ] CONEJO        (6 letras)   pista: Tiene orejas largas y se desplaza dando saltos.
+    [ ] DELFIN        (6 letras)   pista: Es un mamífero marino inteligente y sociable.
+    [ ] CABALLO       (7 letras)   pista: Ha sido utilizado para montar y tirar de vehículos.
+    [ ] TORTUGA       (7 letras)   pista: Lleva una cubierta rígida que protege su cuerpo.
+    [ ] GALLINA       (7 letras)   pista: Es un ave de corral que pone huevos.
+    [ ] ELEFANTE      (8 letras)   pista: Es un mamífero enorme con trompa y grandes orejas.
+    [ ] CANGREJO      (8 letras)   pista: Tiene pinzas y suele desplazarse de lado.
+    [ ] MARIPOSA      (8 letras)   pista: Cambia por metamorfosis y tiene alas coloridas.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] SERPIENTE     (9 letras)   pista: Se desplaza sin patas y posee un cuerpo alargado.
+    [ ] COCODRILO     (9 letras)   pista: Es un gran reptil semiacuático con mandíbula poderosa.
+    [ ] MARIQUITA     (9 letras)   pista: Es un insecto pequeño, redondo y normalmente tiene puntos.
+    [ ] MURCIELAGO    (10 letras)   pista: Es el único mamífero capaz de vuelo sostenido.
+    [ ] HIPOPOTAMO    (10 letras)   pista: Pasa gran parte del día en el agua pese a ser terrestre.
+    [ ] RINOCERONTE   (11 letras)   pista: Es un mamífero robusto con uno o más cuernos en el hocico.
+
+
+==============================================================================
+  COMIDA
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] PAN           (3 letras)   pista: Se prepara horneando una masa hecha principalmente con harina.
+    [ ] UVA           (3 letras)   pista: Es una fruta pequeña que crece agrupada en racimos.
+    [ ] PERA          (4 letras)   pista: Es una fruta de base ancha y parte superior estrecha.
+    [ ] TACO          (4 letras)   pista: Consiste en una tortilla doblada alrededor de un relleno.
+    [ ] HUEVO         (5 letras)   pista: Tiene cáscara y se usa en innumerables preparaciones.
+    [ ] QUESO         (5 letras)   pista: Se obtiene al transformar y madurar leche.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [ ] BANANA        (6 letras)   pista: Es una fruta alargada con cáscara amarilla.
+    [ ] SANDIA        (6 letras)   pista: Es grande, verde por fuera y muy jugosa por dentro.
+    [ ] TOMATE        (6 letras)   pista: Es rojo al madurar y se usa mucho en salsas y ensaladas.
+    [ ] HELADO        (6 letras)   pista: Es un postre frío de textura cremosa.
+    [ ] MANZANA       (7 letras)   pista: Es una fruta redonda asociada con huertos de clima templado.
+    [ ] NARANJA       (7 letras)   pista: Es un cítrico redondo de color intenso.
+    [ ] PLATANO       (7 letras)   pista: Es una fruta curva que se pela antes de comer.
+    [ ] GALLETA       (7 letras)   pista: Es una porción pequeña y horneada, normalmente crujiente.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] CHOCOLATE     (9 letras)   pista: Se elabora a partir de semillas de una planta tropical.
+    [ ] ZANAHORIA     (9 letras)   pista: Es una raíz comestible, generalmente de color anaranjado.
+    [ ] MANDARINA     (9 letras)   pista: Es un cítrico pequeño cuya cáscara se retira fácilmente.
+    [ ] ESPAGUETI     (9 letras)   pista: Es una pasta larga y delgada que suele servirse con salsa.
+    [ ] PALOMITAS     (9 letras)   pista: Se forman cuando ciertos granos revientan con el calor.
+    [ ] HAMBURGUESA   (11 letras)   pista: Lleva un relleno redondo entre dos partes de un pan.
+
+
+==============================================================================
+  TRANSPORTE
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] MOTO          (4 letras)   pista: Tiene dos ruedas y un motor, pero no se pedalea.
+    [ ] TREN          (4 letras)   pista: Circula sobre rieles y puede arrastrar varios vagones.
+    [ ] BOTE          (4 letras)   pista: Es una embarcación pequeña para desplazarse sobre el agua.
+    [ ] TAXI          (4 letras)   pista: Transporta pasajeros a cambio de una tarifa.
+    [ ] BARCO         (5 letras)   pista: Es una embarcación capaz de recorrer mares o ríos.
+    [ ] AVION         (5 letras)   pista: Tiene alas y transporta personas o carga por el aire.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [ ] CAMION        (6 letras)   pista: Está diseñado principalmente para transportar carga pesada.
+    [ ] LANCHA        (6 letras)   pista: Es una embarcación pequeña y rápida, normalmente con motor.
+    [ ] COHETE        (6 letras)   pista: Se impulsa expulsando gases y puede viajar fuera de la atmósfera.
+    [ ] VELERO        (6 letras)   pista: Aprovecha el viento para moverse sobre el agua.
+    [ ] TRACTOR       (7 letras)   pista: Se utiliza en el campo para arrastrar maquinaria agrícola.
+    [ ] AUTOBUS       (7 letras)   pista: Lleva numerosos pasajeros siguiendo una ruta.
+    [ ] CARRETA       (7 letras)   pista: Es un vehículo sencillo que suele ser tirado por animales.
+    [ ] PATINETA      (8 letras)   pista: Es una tabla con ruedas sobre la que se viaja de pie.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] BICICLETA     (9 letras)   pista: Tiene dos ruedas y avanza mediante pedales.
+    [ ] SUBMARINO     (9 letras)   pista: Puede navegar durante largos periodos bajo el agua.
+    [ ] CAMIONETA     (9 letras)   pista: Es un vehículo versátil con espacio para carga o pasajeros.
+    [ ] AMBULANCIA    (10 letras)   pista: Transporta pacientes y cuenta con equipo de emergencia.
+    [ ] HELICOPTERO   (11 letras)   pista: Sus aspas le permiten elevarse verticalmente y quedar suspendido.
+    [ ] MOTOCICLETA   (11 letras)   pista: Es un vehículo motorizado de dos ruedas que se conduce sentado.
+
+
+==============================================================================
+  INSTRUMENTOS
+==============================================================================
+
+  FACIL      (<=5 letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] ARPA          (4 letras)   pista: Sus numerosas cuerdas se pulsan dentro de un marco triangular.
+    [ ] GONG          (4 letras)   pista: Es un gran disco metálico que se golpea y produce resonancia.
+    [ ] LIRA          (4 letras)   pista: Tiene cuerdas sujetas a un marco abierto de origen antiguo.
+    [ ] TUBA          (4 letras)   pista: Es un instrumento de viento metálico con sonido muy grave.
+    [ ] PIANO         (5 letras)   pista: Sus teclas activan mecanismos que golpean cuerdas internas.
+    [ ] BANJO         (5 letras)   pista: Tiene cuerdas y una caja circular cubierta por una membrana.
+
+  INTERMEDIO (6-8 letras)   -   8 palabras
+  --------------------------------------------------------------------------
+    [ ] FLAUTA        (6 letras)   pista: Produce sonido al soplar aire a través de un tubo.
+    [ ] VIOLIN        (6 letras)   pista: Se apoya cerca del hombro y normalmente se toca con arco.
+    [ ] TAMBOR        (6 letras)   pista: Su membrana produce sonido al ser golpeada.
+    [ ] BATERIA       (7 letras)   pista: Agrupa varias piezas de percusión para tocarlas en conjunto.
+    [ ] MARACAS       (7 letras)   pista: Se agitan con las manos para producir ritmo.
+    [ ] UKELELE       (7 letras)   pista: Es pequeño, tiene cuatro cuerdas y origen hawaiano.
+    [ ] GUITARRA      (8 letras)   pista: Normalmente tiene seis cuerdas y se toca con ambas manos.
+    [ ] TROMPETA      (8 letras)   pista: Es de metal, se sopla y suele tener tres válvulas.
+
+  DIFICIL    (9+ letras)   -   6 palabras
+  --------------------------------------------------------------------------
+    [ ] CLARINETE     (9 letras)   pista: Es un tubo de viento con llaves y una lengüeta.
+    [ ] PANDERETA     (9 letras)   pista: Combina una membrana circular con pequeñas piezas metálicas.
+    [ ] MANDOLINA     (9 letras)   pista: Es de cuerdas, cuerpo pequeño y suele tocarse con púa.
+    [ ] CONTRABAJO    (10 letras)   pista: Es el miembro más grande y grave de su familia de cuerdas.
+    [ ] VIOLONCHELO   (11 letras)   pista: Se toca sentado, apoyado en el suelo y usando un arco.
+    [ ] SINTETIZADOR  (12 letras)   pista: Genera sonidos electrónicos que pueden imitar otros instrumentos.
+
+
+==============================================================================
+Generado desde src/wordBank.ts - si el banco cambia, este archivo queda viejo.
+==============================================================================

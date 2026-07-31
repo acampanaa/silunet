@@ -82,7 +82,7 @@ SVG y sumarla al mapa `ART`.
 | **Salón de la fama** | Ranking histórico acumulado de todas las partidas jugadas. |
 | **Identidad persistente** | Token guardado en el celular: reconoce al jugador que vuelve sin pedirle registro. |
 | **Sonidos** | Sintetizados con Web Audio API — sin archivos ni CDN, porque la LAN de la feria no tiene internet. |
-| **Avatares** | Elegibles en `/join`, visibles en todos los rankings. |
+| **Avatares** | Formas predeterminadas o foto personal desde cámara/galería; visibles en perfil y rankings. La foto se reduce a 256×256 antes de guardarse. |
 
 ---
 
@@ -95,16 +95,18 @@ SVG y sumarla al mapa `ART`.
   **tres veces** con variables de entorno distintas para formar el clúster.
 - **Frontend:** HTML + CSS + JavaScript plano, **sin proceso de build**, para que abra
   directo desde el QR sin instalar nada.
-- **Persistencia:** `node:sqlite` (SQLite integrado en Node 22+). Sin servidor de base de
-  datos externo.
+- **Persistencia histórica:** PostgreSQL compartido mediante `pg`. Los tres nodos usan
+  la misma `DATABASE_URL`; SQLite queda únicamente como respaldo de desarrollo local.
 
-### Decisión de diseño clave: sin Redis, sin BD externa para el estado vivo
+### Decisión de diseño clave: la base histórica no reemplaza el estado distribuido
 
 El estado de la partida vive **en memoria** y el coordinador lo replica a los seguidores.
-Esto es deliberado: externalizar el estado a Redis o a una base de datos compartida
+Esto es deliberado: externalizar ese estado vivo a Redis o a PostgreSQL
 **recentralizaría** el sistema y vaciaría de sentido la elección de líder — el punto único
 de fallo volvería por la puerta de atrás. La réplica entre nodos *es* el mecanismo que
 elimina el SPOF, porque cualquier seguidor tiene lo necesario para asumir la coordinación.
+PostgreSQL guarda únicamente identidades y partidas ya cerradas, donde sí se necesita una
+fuente histórica única y consistente.
 
 ### Los 4 ejes: dónde vive cada uno
 
@@ -134,7 +136,8 @@ al coordinador (`N_FORWARD_GUESS`) y la respuesta vuelve enrutada a su conexión
 Los tres nodos son **simétricos** (mismo código). En operación normal uno es
 **coordinador** —única fuente de verdad, el único que muta el marcador y el único que
 escribe en la base de datos— y los otros dos mantienen una **réplica pasiva** en memoria,
-lista para asumir el mando si el líder cae.
+lista para asumir el mando si el líder cae. Todos consultan la misma base PostgreSQL, pero
+solo el coordinador que posee una concesión vigente puede escribir en ella.
 
 ---
 
@@ -171,7 +174,10 @@ flowchart TB
     N2 <-->|N2N| N3
     N1 <-->|N2N| N3
 
-    N1 --> DB1[("SQLite<br/>solo el coordinador escribe")]
+    DB[("PostgreSQL compartido<br/>historia confirmada")]
+    N1 -->|escritura con concesión| DB
+    N2 -.->|lectura / failover| DB
+    N3 -.->|lectura / failover| DB
 ```
 
 ### Dos aciertos concurrentes: Lamport + exclusión mutua
@@ -246,22 +252,24 @@ erDiagram
     PARTIDAS  ||--o{ PARTICIPACIONES : "registra"
 
     JUGADORES {
-        INTEGER id PK
-        TEXT    token "UUID guardado en el celular"
+        UUID    token PK "guardado en el celular"
         TEXT    nick
-        TEXT    creado_en
-        INTEGER avatar_id
+        TIMESTAMPTZ creado_en
+        SMALLINT avatar_id
+        UUID avatar_key UK "clave pública opcional"
+        TEXT avatar_mime "image/jpeg"
+        BYTEA avatar_data "foto reducida, máximo 200 KB"
     }
     PARTIDAS {
-        INTEGER id PK
+        UUID    id PK
+        BIGINT  numero UK
         TEXT    nombre "ej. Casa Abierta #3"
         INTEGER total_rondas
-        TEXT    jugada_en
+        TIMESTAMPTZ jugada_en
     }
     PARTICIPACIONES {
-        INTEGER id PK
-        INTEGER jugador_id FK
-        INTEGER partida_id FK
+        UUID jugador_token PK,FK
+        UUID partida_id PK,FK
         INTEGER puntos
         INTEGER puesto "1 = ganó"
         TEXT    medalla "oro|plata|bronce|NULL"
@@ -277,15 +285,21 @@ erDiagram
 
 El esquema completo y comentado está en **[`BDD.sql`](BDD.sql)**.
 
-- **Motor:** SQLite vía `node:sqlite`. **No hay que instalar ni levantar nada**: el
-  archivo se crea solo en `data/silunet-<NODE_ID>.db` al arrancar cada nodo.
-- **`BDD.sql` es documentación de referencia**, no un paso obligatorio del despliegue: la
-  aplicación aplica el mismo esquema sola en `src/db.ts` (`migrate()`, idempotente).
-  Para recrear la base a mano: `sqlite3 data/silunet-node1.db < BDD.sql`.
+- **Motor:** PostgreSQL 16 recomendado, compartido por los tres nodos mediante la misma
+  variable `DATABASE_URL`.
+- **Migración automática:** al arrancar, `src/postgres.ts` aplica [`BDD.sql`](BDD.sql) de
+  forma idempotente. Un bloqueo asesor serializa el DDL cuando los tres nodos arrancan a
+  la vez.
+- **Desarrollo local:** [`compose.yaml`](compose.yaml) levanta PostgreSQL con Docker. Si
+  no se define `DATABASE_URL`, se usa SQLite como compatibilidad local y se muestra una
+  advertencia; ese modo no garantiza historial consistente en un clúster.
 - **Alcance:** solo guarda **historia ya cerrada** (identidades y resultados de partidas
   terminadas). El estado vivo nunca toca la base.
-- **Regla distribuida:** solo el **coordinador electo** escribe. Cada nodo tiene su propio
-  archivo, listo para cuando Bully lo promueva.
+- **Regla distribuida:** solo el **coordinador electo** escribe. PostgreSQL mantiene una
+  concesión (*lease*) con término de cercado: un líder anterior no puede seguir
+  escribiendo durante un cambio de coordinador o un escenario de *split-brain*.
+- **Cierre íntegro:** partida y participaciones se guardan en una transacción. Cada partida
+  lleva un UUID replicado, por lo que un reintento tras un failover es idempotente.
 - Las estadísticas (partidas ganadas, puntos totales, medallero) **se calculan** con
   consultas agregadas, no se almacenan — así no pueden quedar desincronizadas.
 
@@ -329,11 +343,14 @@ eligió para un proyecto de este tamaño y duración.
 
 | Requisito | Detalle |
 |---|---|
-| **Node.js 22 o superior** | **Obligatorio.** La persistencia usa `node:sqlite`, que no existe en versiones anteriores. Verificar con `node --version`. |
+| **Node.js 22 o superior** | Obligatorio para compilar/ejecutar y para el respaldo SQLite de desarrollo. Verificar con `node --version`. |
+| **PostgreSQL 16+** | Recomendado para el clúster. Puede ser una instancia administrada o Docker; debe ser accesible desde los tres nodos. |
+| Docker Desktop | Opcional: facilita levantar PostgreSQL local con `docker compose up -d postgres`. |
 | Git | Solo para clonar el repositorio. |
 | Navegador moderno | En los celulares y en la laptop del proyector. |
 
-No hace falta instalar bases de datos, Redis ni servidores web.
+No hace falta Redis ni un servidor web adicional. Para el historial consistente sí hace
+falta PostgreSQL compartido.
 
 ### 6.2. Instalación
 
@@ -342,7 +359,14 @@ git clone <URL-del-repositorio>
 cd silunet
 npm install      # descarga ws + TypeScript (una sola vez)
 npm run build    # compila TypeScript a dist/
+
+# PostgreSQL local de desarrollo (opcional)
+docker compose up -d postgres
 ```
+
+Con el contenedor local, la URL es
+`postgresql://silunet:silunet_dev@localhost:5432/silunet`. Es una credencial exclusiva
+de desarrollo; no debe reutilizarse en producción.
 
 ### 6.3. Modo A — Un solo nodo (prueba rápida del juego)
 
@@ -363,6 +387,12 @@ Es **el mismo código** ejecutado tres veces con variables de entorno distintas.
 
 **PowerShell (Windows):**
 
+En cada terminal, definir primero la **misma** conexión:
+
+```powershell
+$env:DATABASE_URL="postgresql://silunet:silunet_dev@localhost:5432/silunet"
+```
+
 ```powershell
 # Terminal 1 — coordinador inicial
 $env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://localhost:3002,ws://localhost:3003"; node dist/server.js
@@ -375,6 +405,12 @@ $env:NODE_ID="node3"; $env:PORT="3003"; $env:COORDINATOR_ID="node1"; $env:PEERS=
 ```
 
 **Bash (Linux / macOS):**
+
+Exportar una sola vez en cada terminal:
+
+```bash
+export DATABASE_URL='postgresql://silunet:silunet_dev@localhost:5432/silunet'
+```
 
 ```bash
 NODE_ID=node1 PORT=3001 COORDINATOR_ID=node1 PEERS=ws://localhost:3002,ws://localhost:3003 node dist/server.js
@@ -406,6 +442,10 @@ Lista de verificación de red:
 
 **Arranque.** Averiguar la IP de cada laptop en esa red (`ipconfig` en Windows) **antes**
 de arrancar, y usar esas IPs reales en `PEERS` — no `localhost`:
+
+Además, definir en las tres laptops la misma `DATABASE_URL` de un PostgreSQL accesible
+desde toda la LAN. Para tolerar la caída de cualquiera de los tres nodos, la base no debe
+vivir en el mismo proceso ni depender exclusivamente de la laptop coordinadora.
 
 ```powershell
 # Laptop 1 (192.168.50.10) — coordinador inicial
@@ -451,6 +491,10 @@ Con la partida en curso, `Ctrl+C` en la terminal del **coordinador**. Lo esperad
 | `PORT` | Puerto HTTP/WebSocket donde escucha. | `3001` |
 | `COORDINATOR_ID` | Quién es coordinador al arrancar. | `node1` |
 | `PEERS` | URLs WS de los otros nodos, separadas por comas. | *(vacío = nodo solo)* |
+| `DATABASE_URL` | Conexión PostgreSQL compartida. Si falta, usa SQLite solo para desarrollo. | *(vacío)* |
+| `DB_POOL_SIZE` | Máximo de conexiones PostgreSQL por nodo. | `5` |
+| `CLUSTER_ID` | Identifica la concesión de escritura si una BD aloja varios clústeres. | `silunet-main` |
+| `ALLOW_SQLITE_CLUSTER` | Excepción insegura usada solo por los bots locales de V&V. | *(vacío)* |
 
 ### 6.9. Problemas comunes
 
@@ -461,7 +505,8 @@ Con la partida en curso, `Ctrl+C` en la terminal del **coordinador**. Lo esperad
 | Cambié TypeScript y no veo el cambio | Falta `npm run build` (o usar `npm run dev`). |
 | Los celulares no abren la página | Deben estar en la **misma Wi-Fi** y usar la IP local (`http://192.168.x.x:3001/join`), no `localhost`. |
 | Los nodos no se ven entre sí | Revisar que `PEERS` apunte a los puertos/IPs correctos y que cada nodo tenga `NODE_ID` y `PORT` distintos. |
-| `node:sqlite` no existe | Node menor a 22. Actualizar. |
+| El servidor no inicia con `DATABASE_URL` | Revisar URL, credenciales, firewall y que PostgreSQL acepte conexiones desde los tres nodos. |
+| El clúster rechaza SQLite | Es intencional: definir la misma `DATABASE_URL` en todos los nodos. `ALLOW_SQLITE_CLUSTER=1` es solo para V&V local. |
 
 Guía paso a paso ampliada: [`EJECUCION.md`](EJECUCION.md).
 
@@ -498,6 +543,9 @@ nodo vivo) con la partida en curso, y verifica que:
 
 Con `VV_VERBOSE=1` delante del comando se ven los logs internos de cada nodo. Ambos bots
 salen con **código 0** si pasan, así que sirven tal cual en un pipeline de CI.
+Por defecto aíslan la prueba con SQLite. Para validar también la integración compartida,
+se puede definir `VV_DATABASE_URL` apuntando a una base PostgreSQL exclusiva de pruebas;
+en ese modo, `vv:caos` también exige que el cierre quede persistido exactamente una vez.
 
 **Herramientas complementarias contempladas para la materia de V&V:** SonarQube
 (calidad), Jenkins (CI/CD), Cypress o Selenium (e2e) y Burp Suite (seguridad).
@@ -513,7 +561,8 @@ src/
   cluster.ts    comunicación entre nodos, heartbeats, elección Bully (Eje 4)
   lamport.ts    reloj lógico de Lamport (Eje 2)
   mutex.ts      candado FIFO del marcador compartido (Eje 3)
-  db.ts         persistencia con node:sqlite
+  db.ts         contrato de persistencia + respaldo SQLite local
+  postgres.ts   PostgreSQL compartido, transacciones y concesión de líder
   wordBank.ts   banco de palabras + siluetas SVG + dificultad
   types.ts      protocolo completo (S2C / C2S / N2N) y modelos de datos
 public/         cliente sin build: join.html, play.html, master.html, sounds.js
@@ -521,6 +570,7 @@ vv/             bots de verificación y validación
 scripts/        arranque de cada nodo (PowerShell)
 docs/           reporte arquitectónico y diagramas en PNG
 BDD.sql         esquema de base de datos documentado
+compose.yaml    PostgreSQL local para desarrollo
 EJECUCION.md    guía de ejecución paso a paso
 CONSIGNA.md     consigna original de la materia
 ```

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<style>
+  body { margin:0; background:#0f0f1a; display:flex; justify-content:center;
+         align-items:center; min-height:100vh; padding:36px; box-sizing:border-box; }
+  .mermaid { width:100%; }
+  .mermaid svg { width:100% !important; height:auto !important; }
+</style></head><body>
+<pre class="mermaid">
+flowchart LR
+    subgraph IN["4 aciertos casi simultáneos (Lamport de cliente desordenado)"]
+        direction TB
+        b1["Bot1 · L_cli=3"]
+        b2["Bot2 · L_cli=1"]
+        b3["Bot3 · L_cli=4"]
+        b4["Bot4 · L_cli=2"]
+    end
+    LOCK{{"Candado FIFO&#10;recurso: marcador&#10;(serializa el acceso)"}}
+    b1 --> LOCK
+    b2 --> LOCK
+    b3 --> LOCK
+    b4 --> LOCK
+    LOCK ==> s1["#1 · L=21 · 1000 pts"]
+    s1  ==> s2["#2 · L=22 · 700 pts"]
+    s2  ==> s3["#3 · L=23 · 400 pts"]
+    s3  ==> s4["#4 · L=24 · 100 pts"]
+    classDef ok fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
+    classDef res fill:#7c3aed22,stroke:#7c3aed,color:#fff;
+    class b1,b2,b3,b4 ok;
+    class s1,s2,s3,s4 res;
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad:true, theme:'dark',
+    themeVariables:{ fontFamily:'system-ui, sans-serif', fontSize:'15px' },
+    flowchart:{ curve:'basis' } });
+</script>
+</body></html>

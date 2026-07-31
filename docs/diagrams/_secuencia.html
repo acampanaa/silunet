@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<style>
+  body { margin:0; background:#0f0f1a; display:flex; justify-content:center;
+         align-items:center; min-height:100vh; padding:36px; box-sizing:border-box; }
+  .mermaid { width:100%; }
+  .mermaid svg { width:100% !important; height:auto !important; }
+</style></head><body>
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant A as Jugador A (Nodo 2)
+    participant B as Jugador B (Nodo 3)
+    participant N as Nodos 2 y 3 (seguidores)
+    participant CO as Nodo 1 ★ Coordinador
+    participant MA as Pantalla Maestra
+    Note over A,B: Ambos envían el intento correcto casi al mismo tiempo
+    A->>N: GUESS "MONITOR" (L_cliente=7)
+    B->>N: GUESS "MONITOR" (L_cliente=9)
+    N->>CO: N_FORWARD_GUESS A (lamport=7)
+    N->>CO: N_FORWARD_GUESS B (lamport=9)
+    rect rgb(40,30,70)
+    Note over CO: scoreboardLock.runExclusive() — sección crítica (Eje 3)
+    CO->>CO: A toma el candado · L=max(L,7)+1=21 · solver 1.º
+    CO-->>MA: CORRECT_ANSWER A · posición 1 · L=21
+    Note over CO: B estaba ENCOLADO (FIFO) hasta liberar el candado
+    CO->>CO: B entra · L=max(21,9)+1=22 · solver 2.º
+    CO-->>MA: CORRECT_ANSWER B · posición 2 · L=22
+    end
+    Note over A,CO: Rama de RECHAZO — si A reintenta tras haber acertado
+    A->>N: GUESS "MONITOR" (otra vez)
+    N->>CO: N_FORWARD_GUESS A
+    CO-->>A: ALREADY_SOLVED  (intento rechazado)
+    Note over CO,MA: ROUND_END — orden por Lamport: 1.º A = 1000 pts · 2.º B = 700 pts
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad:true, theme:'dark',
+    themeVariables:{ fontFamily:'system-ui, sans-serif', fontSize:'14px' },
+    sequence:{ showSequenceNumbers:false } });
+</script>
+</body></html>

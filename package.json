@@ -10,10 +10,12 @@
     "vv:caos": "node vv/caos-coordinador.js"
   },
   "dependencies": {
+    "pg": "^8.22.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.5.13",
     "typescript": "^5.7.0"
   }

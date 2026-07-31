@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Perfil, PerfilReciente, HallOfFameEntry, RecentGame } from './types';
+import { Perfil, PerfilReciente, HallOfFameEntry, RecentGame, GameOverResult } from './types';
 
 // ── v2: Persistencia (identidad e historia del jugador) ──────────────────────
 //
@@ -21,6 +21,7 @@ export interface JugadorIdentidad {
   token: string;
   nick: string;
   avatarId: number;
+  avatarKey?: string;
   returning: boolean; // true = ya existía (token reconocido) → "¡Hola de nuevo!"
 }
 
@@ -45,7 +46,40 @@ export interface ResultadoParticipacion {
   medalla: 'oro' | 'plata' | 'bronce' | null;
 }
 
-export class Store {
+export interface SavedGame {
+  name: string;
+  number: number;
+  savedPlayers: number;
+}
+
+export interface StoredAvatar {
+  mime: 'image/jpeg';
+  data: Buffer;
+}
+
+type MaybePromise<T> = T | Promise<T>;
+
+/** Contrato común de persistencia. PostgreSQL lo implementa de forma asíncrona;
+ * SQLite queda como respaldo local para desarrollo y para los bots de V&V. */
+export interface PersistenceStore {
+  readonly mode: 'postgres' | 'sqlite';
+  init(): MaybePromise<void>;
+  claimLeadership(): Promise<boolean>;
+  renewLeadership(): Promise<boolean>;
+  findOrCreatePlayer(token: string | null, nick: string, avatarId?: number): MaybePromise<JugadorIdentidad>;
+  setAvatar(token: string, avatarId: number): MaybePromise<number | null>;
+  setCustomAvatar(token: string, mime: 'image/jpeg', data: Buffer): MaybePromise<string | null>;
+  getAvatar(key: string): MaybePromise<StoredAvatar | null>;
+  updateIdentity(token: string, nick: string, avatarId?: number): MaybePromise<void>;
+  saveGameResult(result: GameOverResult): MaybePromise<SavedGame>;
+  getProfile(token: string): MaybePromise<Perfil | null>;
+  getHallOfFame(limit?: number): MaybePromise<HallOfFameEntry[]>;
+  getRecentGames(limit?: number): MaybePromise<RecentGame[]>;
+  close(): MaybePromise<void>;
+}
+
+export class Store implements PersistenceStore {
+  readonly mode = 'sqlite' as const;
   private db: DatabaseSync;
 
   constructor(dbPath: string) {
@@ -55,6 +89,10 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL;'); // escrituras rápidas y seguras
     this.migrate();
   }
+
+  init(): void { /* SQLite migra en el constructor. */ }
+  async claimLeadership(): Promise<boolean> { return true; }
+  async renewLeadership(): Promise<boolean> { return true; }
 
   private migrate(): void {
     this.db.exec(`
@@ -87,6 +125,10 @@ export class Store {
     // arriba) para que las DB creadas por v2 —que ya tienen jugadores sin esta
     // columna— sigan abriendo sin borrarse.
     this.addColumnIfMissing('jugadores', 'avatar_id', 'INTEGER NOT NULL DEFAULT 0');
+    this.addColumnIfMissing('jugadores', 'avatar_key', 'TEXT');
+    this.addColumnIfMissing('jugadores', 'avatar_mime', 'TEXT');
+    this.addColumnIfMissing('jugadores', 'avatar_data', 'BLOB');
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS jugadores_avatar_key_idx ON jugadores (avatar_key)');
   }
 
   /** SQLite no tiene "ADD COLUMN IF NOT EXISTS": hay que mirar el pragma. */
@@ -109,8 +151,8 @@ export class Store {
     const cleanAvatar = normalizeAvatarId(avatarId);
 
     if (token) {
-      const row = this.db.prepare('SELECT id, nick, avatar_id FROM jugadores WHERE token = ?').get(token) as
-        | { id: number; nick: string; avatar_id: number }
+      const row = this.db.prepare('SELECT id, nick, avatar_id, avatar_key FROM jugadores WHERE token = ?').get(token) as
+        | { id: number; nick: string; avatar_id: number; avatar_key: string | null }
         | undefined;
       if (row) {
         const nextAvatar = cleanAvatar ?? row.avatar_id;
@@ -119,7 +161,7 @@ export class Store {
             .prepare('UPDATE jugadores SET nick = ?, avatar_id = ? WHERE id = ?')
             .run(cleanNick, nextAvatar, row.id);
         }
-        return { token, nick: cleanNick, avatarId: nextAvatar, returning: true };
+        return { token, nick: cleanNick, avatarId: nextAvatar, avatarKey: row.avatar_key ?? undefined, returning: true };
       }
     }
 
@@ -134,8 +176,26 @@ export class Store {
   /** Cambia solo el avatar de una identidad ya existente. */
   setAvatar(token: string, avatarId: number): number | null {
     const clean = normalizeAvatarId(avatarId) ?? 0;
-    const info = this.db.prepare('UPDATE jugadores SET avatar_id = ? WHERE token = ?').run(clean, token);
+    const info = this.db.prepare(
+      'UPDATE jugadores SET avatar_id = ?, avatar_key = NULL, avatar_mime = NULL, avatar_data = NULL WHERE token = ?',
+    ).run(clean, token);
     return info.changes > 0 ? clean : null;
+  }
+
+  setCustomAvatar(token: string, mime: 'image/jpeg', data: Buffer): string | null {
+    const key = randomUUID();
+    const info = this.db.prepare(
+      'UPDATE jugadores SET avatar_key = ?, avatar_mime = ?, avatar_data = ? WHERE token = ?',
+    ).run(key, mime, data, token);
+    return info.changes > 0 ? key : null;
+  }
+
+  getAvatar(key: string): StoredAvatar | null {
+    const row = this.db.prepare(
+      'SELECT avatar_mime, avatar_data FROM jugadores WHERE avatar_key = ?',
+    ).get(key) as { avatar_mime: string; avatar_data: Uint8Array } | undefined;
+    if (!row || row.avatar_mime !== 'image/jpeg' || !row.avatar_data) return null;
+    return { mime: 'image/jpeg', data: Buffer.from(row.avatar_data) };
   }
 
   /**
@@ -146,9 +206,7 @@ export class Store {
    * cambio de avatar hecho al reconectarse se veía en el ranking pero nunca
    * llegaba a la DB — y el perfil seguía mostrando el anterior.
    *
-   * Si el token no existe en la DB de ESTE nodo (caso failover: cada nodo tiene
-   * su propio archivo SQLite), no hace nada. Es lo correcto: no queremos
-   * inventar una identidad a medias en un nodo que nunca vio a este jugador.
+ * Si el token no existe, no hace nada: no se inventa una identidad a medias.
    */
   updateIdentity(token: string, nick: string, avatarId?: number): void {
     const cleanNick   = nick.trim().slice(0, 20) || 'Anónimo';
@@ -191,11 +249,29 @@ export class Store {
       .run(jugador.id, partidaId, r.puntos, r.puesto, r.medalla);
   }
 
+  saveGameResult(result: GameOverResult): SavedGame {
+    const number = this.countPartidas() + 1;
+    const name = `Casa Abierta #${number}`;
+    const partidaId = this.createPartida(name, result.totalRounds);
+    let savedPlayers = 0;
+    for (const standing of result.standings) {
+      if (!standing.token) continue;
+      this.recordParticipacion(partidaId, {
+        token: standing.token,
+        puntos: standing.score,
+        puesto: standing.position,
+        medalla: standing.medalla,
+      });
+      savedPlayers++;
+    }
+    return { name, number, savedPlayers };
+  }
+
   /** Perfil agregado de un jugador. Las stats se CALCULAN, no se almacenan. */
   getProfile(token: string): Perfil | null {
     const jugador = this.db
-      .prepare('SELECT id, nick, avatar_id, creado_en FROM jugadores WHERE token = ?')
-      .get(token) as { id: number; nick: string; avatar_id: number; creado_en: string } | undefined;
+      .prepare('SELECT id, nick, avatar_id, avatar_key, creado_en FROM jugadores WHERE token = ?')
+      .get(token) as { id: number; nick: string; avatar_id: number; avatar_key: string | null; creado_en: string } | undefined;
     if (!jugador) return null;
 
     const agg = this.db
@@ -228,6 +304,7 @@ export class Store {
     return {
       nick: jugador.nick,
       avatarId: jugador.avatar_id,
+      avatarKey: jugador.avatar_key ?? undefined,
       creadoEn: jugador.creado_en,
       partidasJugadas: agg.jugadas,
       partidasGanadas: agg.ganadas,
@@ -249,6 +326,7 @@ export class Store {
         `SELECT
            j.nick                                                       AS nick,
            j.avatar_id                                                  AS avatarId,
+           j.avatar_key                                                 AS avatarKey,
            COUNT(*)                                                     AS partidasJugadas,
            COALESCE(SUM(pt.puntos), 0)                                  AS puntosAcumulados,
            COALESCE(SUM(CASE WHEN pt.medalla = 'oro'    THEN 1 ELSE 0 END), 0) AS oro,

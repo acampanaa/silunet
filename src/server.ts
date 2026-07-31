@@ -6,7 +6,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Game }          from './game';
 import { Cluster }       from './cluster';
-import { Store, normalizeAvatarId } from './db';
+import { Store, normalizeAvatarId, PersistenceStore } from './db';
+import { PostgresStore } from './postgres';
 import { S2C, C2S, N2N, GameOverResult } from './types';
 
 // ── Configuración por instancia ───────────────────────────────────────────────
@@ -20,10 +21,21 @@ const PEER_URLS      = (process.env.PEERS ?? '').split(',').filter(Boolean);
 const game    = new Game();
 const cluster = new Cluster(NODE_ID, COORDINATOR_ID, game.clock, PEER_URLS);
 
-// v2: persistencia de identidad e historia. Cada nodo abre su propio archivo
-// (para que un seguidor promovido por Bully tenga un Store listo), pero SOLO el
-// coordinador resuelve identidad y escribe. La partida en vivo nunca lee de aquí.
-const store = new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
+// Persistencia de identidad e historia. En despliegue, todos los nodos apuntan
+// a la misma instancia PostgreSQL; SQLite solo conserva el flujo de desarrollo.
+// El coordinador resuelve identidad y escribe. La partida en vivo nunca lee aquí.
+const DATABASE_URL = process.env.DATABASE_URL;
+const ALLOW_SQLITE_CLUSTER = process.env.ALLOW_SQLITE_CLUSTER === '1';
+const store: PersistenceStore = DATABASE_URL
+  ? new PostgresStore(DATABASE_URL, NODE_ID)
+  : new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
+
+if (!DATABASE_URL && PEER_URLS.length > 0 && ALLOW_SQLITE_CLUSTER) {
+  console.warn(`[${NODE_ID}] ⚠ DATABASE_URL ausente: SQLite es solo para desarrollo; el historial NO será consistente entre nodos.`);
+}
+
+const AVATAR_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_CUSTOM_AVATAR_BYTES = 200 * 1024;
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MIME: Record<string, string> = {
@@ -62,6 +74,30 @@ function siblingNodeUrls(): string[] {
 
 const httpServer = http.createServer((req, res) => {
   let urlPath = (req.url ?? '/').split('?')[0];
+
+  const avatarMatch = urlPath.match(/^\/api\/avatar\/([0-9a-f-]+)$/i);
+  if (avatarMatch) {
+    if (!AVATAR_KEY_RE.test(avatarMatch[1])) {
+      res.writeHead(404); res.end('Not found'); return;
+    }
+    void Promise.resolve(store.getAvatar(avatarMatch[1]))
+      .then(avatar => {
+        if (!avatar) { res.writeHead(404); res.end('Not found'); return; }
+        res.writeHead(200, {
+          'Content-Type': avatar.mime,
+          'Content-Length': avatar.data.length,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        res.end(avatar.data);
+      })
+      .catch(error => {
+        console.error(`[${NODE_ID}] No se pudo leer el avatar ${avatarMatch[1]}:`, error);
+        if (!res.headersSent) res.writeHead(503);
+        res.end('Avatar unavailable');
+      });
+    return;
+  }
 
   if (urlPath === '/api/info') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -195,55 +231,134 @@ function hintPayload(playerId: string): S2C {
   return { type: 'HINT_RESULT', ...result };
 }
 
+function parseCustomAvatar(dataUrl: string): Buffer | null {
+  if (typeof dataUrl !== 'string' || dataUrl.length > 300_000) return null;
+  const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) return null;
+  const data = Buffer.from(match[1], 'base64');
+  if (data.length < 4 || data.length > MAX_CUSTOM_AVATAR_BYTES) return null;
+  // JPEG: SOI FF D8 y marcador posterior FF. No se aceptan SVG ni tipos activos.
+  if (data[0] !== 0xff || data[1] !== 0xd8 || data[2] !== 0xff) return null;
+  return data;
+}
+
 // v2 + Eje 4: resuelve una identidad de JOIN en el coordinador.
 //
 // Primero intenta una RECONEXIÓN EN VIVO: si el token que trae el celular ya
 // tiene un jugador desconectado en la partida en curso, lo retoma desde memoria
 // (que se replica entre nodos vía N_REPLICATE) SIN tocar la base de datos. Esto
-// es necesario porque cada nodo tiene su propio archivo SQLite: si el celular se
-// reconecta a un nodo distinto tras un failover, la DB de ese nodo nunca ha visto
-// ese token y le asignaría uno nuevo, perdiendo el puntaje acumulado de HOY. Solo
-// cuando no hay partida en curso con ese token se consulta/crea la identidad
-// persistente (historial entre partidas) en la DB local.
-function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string, avatarId?: number) {
+// Esto evita depender de la base durante una reconexión a mitad de ronda. Solo
+// cuando no hay una partida en curso con ese token se consulta o crea la
+// identidad persistente en la fuente compartida.
+async function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string, avatarId?: number) {
   if (token && game.wasConnected(token)) {
-    const player = game.addPlayer(playerId, nick, token, originNode, avatarId);
     // La partida en vivo se retoma desde memoria (arriba), pero el nick/avatar
     // que trae el celular sí hay que persistirlos: si no, el perfil seguiría
     // mostrando los anteriores y no coincidiría con lo que se ve en el ranking.
-    // No-op si este nodo no conoce el token (failover).
-    store.updateIdentity(token, nick, avatarId);
-    return { player, token, returning: true, reconnected: true, avatarId: player.avatarId ?? 0 };
+    // No-op si la identidad todavía no existe (compatibilidad con clientes viejos).
+    await store.updateIdentity(token, nick, avatarId);
+    const player = game.addPlayer(playerId, nick, token, originNode, avatarId);
+    return { player, token, returning: true, reconnected: true, avatarId: player.avatarId ?? 0, avatarKey: player.avatarKey };
   }
-  const id     = store.findOrCreatePlayer(token, nick, avatarId);
-  const player = game.addPlayer(playerId, id.nick, id.token, originNode, id.avatarId);
-  return { player, token: id.token, returning: id.returning, reconnected: false, avatarId: id.avatarId };
+  const id     = await store.findOrCreatePlayer(token, nick, avatarId);
+  const player = game.addPlayer(playerId, id.nick, id.token, originNode, id.avatarId, id.avatarKey);
+  return { player, token: id.token, returning: id.returning, reconnected: false, avatarId: id.avatarId, avatarKey: id.avatarKey };
 }
 
 // ── v2: persistencia al cerrar la partida (Paso 3) ───────────────────────────
 // Game emite 'game_over' en el nodo que controla la partida. Solo el COORDINADOR
 // escribe la historia (Eje 4: la persistencia depende de quién fue electo líder).
-game.on('game_over', (result: GameOverResult) => {
+const pendingGameResults = new Map<string, GameOverResult>();
+let persistenceRetryRunning = false;
+
+async function persistGameResult(result: GameOverResult): Promise<void> {
+  pendingGameResults.set(result.gameId, result);
   if (!cluster.isCoordinator) return;
-  const nombre    = `Casa Abierta #${store.countPartidas() + 1}`;
-  const partidaId = store.createPartida(nombre, result.totalRounds);
-  let guardados = 0;
-  for (const s of result.standings) {
-    if (!s.token) continue; // jugador sin identidad persistente → no se historia
-    store.recordParticipacion(partidaId, {
-      token:   s.token,
-      puntos:  s.score,
-      puesto:  s.position,
-      medalla: s.medalla,
-    });
-    guardados++;
+  try {
+    const saved = await store.saveGameResult(result);
+    pendingGameResults.delete(result.gameId);
+    console.log(`[${NODE_ID}] 💾 "${saved.name}" persistida (partida ${saved.number}, ${saved.savedPlayers} jugadores)`);
+  } catch (error) {
+    console.error(`[${NODE_ID}] No se pudo persistir la partida ${result.gameId}; se reintentará:`, error);
   }
-  console.log(`[${NODE_ID}] 💾 "${nombre}" persistida (partida #${partidaId}, ${guardados} jugadores)`);
-});
+}
+
+game.on('game_over', (result: GameOverResult) => void persistGameResult(result));
+
+setInterval(async () => {
+  if (!cluster.isCoordinator || persistenceRetryRunning || pendingGameResults.size === 0) return;
+  persistenceRetryRunning = true;
+  try {
+    for (const result of pendingGameResults.values()) await persistGameResult(result);
+  } finally {
+    persistenceRetryRunning = false;
+  }
+}, 3000);
+
+const LEADER_CLAIM_ATTEMPTS = 8;
+const LEADER_CLAIM_DELAY_MS = 1000;
+let leadershipMaintenanceRunning = false;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withExclusiveLeadershipOperation<T>(work: () => Promise<T>): Promise<T> {
+  while (leadershipMaintenanceRunning) await delay(25);
+  leadershipMaintenanceRunning = true;
+  try {
+    return await work();
+  } finally {
+    leadershipMaintenanceRunning = false;
+  }
+}
+
+async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (!cluster.isCoordinator) return false;
+    try {
+      if (await store.claimLeadership()) {
+        console.log(`[${NODE_ID}] ✓ Concesión de escritura ${store.mode} adquirida`);
+        return true;
+      }
+    } catch (error) {
+      console.error(`[${NODE_ID}] Error al solicitar la concesión de escritura:`, error);
+    }
+    if (attempt < attempts) await delay(LEADER_CLAIM_DELAY_MS);
+  }
+  return false;
+}
+
+async function activateCoordinator(): Promise<void> {
+  console.log(`[${NODE_ID}] ★ Coordinador electo; validando la concesión de persistencia`);
+  const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
+  if (!acquired) {
+    console.error(`[${NODE_ID}] No se obtuvo la concesión de escritura; la partida no se reanudará todavía`);
+    return;
+  }
+  game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
+  game.resume();
+}
+
+setInterval(async () => {
+  if (!cluster.isCoordinator || leadershipMaintenanceRunning) return;
+  try {
+    await withExclusiveLeadershipOperation(async () => {
+      const renewed = await store.renewLeadership();
+      if (!renewed) {
+        console.warn(`[${NODE_ID}] Se perdió la concesión de escritura; intentando recuperarla`);
+        await acquirePersistenceLeadership(1);
+      }
+    });
+  } catch (error) {
+    console.error(`[${NODE_ID}] No se pudo renovar la concesión de escritura:`, error);
+  }
+}, 2000);
 
 // ── Mensajes entre nodos ──────────────────────────────────────────────────────
 
 cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
+  try {
   switch (msg.type) {
 
     // Seguidor recibe broadcast del coordinador → entregar a clientes locales
@@ -264,12 +379,12 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía JOIN de un jugador al coordinador
     case 'N_FORWARD_JOIN': {
       if (!cluster.isCoordinator) return;
-      const { player, token: playerToken, returning, reconnected, avatarId } = resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode, msg.avatarId);
+      const { player, token: playerToken, returning, reconnected, avatarId, avatarKey } = await resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode, msg.avatarId);
       // WELCOME → solo al jugador que se unió, en su nodo de origen
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
-        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId },
+        payload:  { type: 'WELCOME', playerId: player.id, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId, avatarKey },
         lamport:  game.clock.tick(),
       });
       // Si hay ronda en curso, sincronizar estado al nuevo jugador
@@ -327,9 +442,36 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía el cambio de avatar de su jugador al coordinador
     case 'N_FORWARD_SET_AVATAR':
       if (!cluster.isCoordinator) return;
-      store.setAvatar(msg.token, msg.avatarId);
+      await store.setAvatar(msg.token, msg.avatarId);
       game.setPlayerAvatar(msg.playerId, msg.avatarId);
+      cluster.sendToPeer(msg.originNode, {
+        type: 'N_SEND_TO', playerId: msg.playerId,
+        payload: { type: 'AVATAR_UPDATED', avatarId: msg.avatarId, avatarKey: null },
+        lamport: game.clock.tick(),
+      });
       break;
+
+    case 'N_FORWARD_CUSTOM_AVATAR': {
+      if (!cluster.isCoordinator) return;
+      const data = parseCustomAvatar(msg.dataUrl);
+      if (!data) {
+        cluster.sendToPeer(msg.originNode, {
+          type: 'N_SEND_TO', playerId: msg.playerId,
+          payload: { type: 'ERROR', message: 'La foto no es válida o supera 200 KB.' },
+          lamport: game.clock.tick(),
+        });
+        return;
+      }
+      const avatarKey = await store.setCustomAvatar(msg.token, 'image/jpeg', data);
+      if (!avatarKey) throw new Error('La identidad del jugador no existe');
+      game.setPlayerCustomAvatar(msg.playerId, avatarKey);
+      cluster.sendToPeer(msg.originNode, {
+        type: 'N_SEND_TO', playerId: msg.playerId,
+        payload: { type: 'AVATAR_UPDATED', avatarId: game.getPlayer(msg.playerId)?.avatarId ?? 0, avatarKey },
+        lamport: game.clock.tick(),
+      });
+      break;
+    }
 
     // v2: seguidor pidió un perfil → el coordinador lo lee de su DB y lo devuelve
     case 'N_FORWARD_PROFILE': {
@@ -337,7 +479,7 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
-        payload:  { type: 'PROFILE', profile: store.getProfile(msg.token) },
+        payload:  { type: 'PROFILE', profile: await store.getProfile(msg.token) },
         lamport:  game.clock.tick(),
       });
       break;
@@ -346,10 +488,14 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // v2.1: la pantalla maestra de un seguidor pidió el salón de la fama
     case 'N_FORWARD_HALL_OF_FAME': {
       if (!cluster.isCoordinator) return;
+      const [top, recentGames] = await Promise.all([
+        store.getHallOfFame(10),
+        store.getRecentGames(6),
+      ]);
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.requesterId,
-        payload:  { type: 'HALL_OF_FAME', top: store.getHallOfFame(10), recentGames: store.getRecentGames(6) },
+        payload:  { type: 'HALL_OF_FAME', top, recentGames },
         lamport:  game.clock.tick(),
       });
       break;
@@ -360,6 +506,9 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       if (!cluster.isCoordinator) return;
       game.removePlayer(msg.playerId);
       break;
+  }
+  } catch (error) {
+    console.error(`[${NODE_ID}] Falló el mensaje ${msg.type} recibido de ${fromPeerId}:`, error);
   }
 });
 
@@ -377,11 +526,7 @@ cluster.on('peer_disconnected', () => {
 });
 
 // Eje 4: este nodo ganó la elección Bully → asume el control de la partida.
-cluster.on('became_coordinator', () => {
-  console.log(`[${NODE_ID}] ★ Asumo coordinación: reanudo la partida desde la réplica`);
-  game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
-  game.resume();
-});
+cluster.on('became_coordinator', () => void activateCoordinator());
 cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
 
 // Eje 4: cualquier cambio de topología o de coordinador se empuja al master.
@@ -402,7 +547,7 @@ setInterval(() => {
 
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 512 * 1024 });
 
 wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
   // Las conexiones entre nodos se identifican por el header x-silunet-peer
@@ -421,6 +566,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const client = clients.get(ws)!;
     client.lastSeen = Date.now(); // Eje 4: cualquier mensaje (incl. PING) cuenta como latido
 
+    try {
     switch (msg.type) {
 
       case 'JOIN': {
@@ -433,8 +579,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         client.role     = 'player';
 
         if (cluster.isCoordinator) {
-          const { player, token: playerToken, returning, reconnected, avatarId } = resolveJoin(playerId, nick, token, NODE_ID, msg.avatarId);
-          send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId });
+          const { player, token: playerToken, returning, reconnected, avatarId, avatarKey } = await resolveJoin(playerId, nick, token, NODE_ID, msg.avatarId);
+          send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId, avatarKey });
           const roundInfo = game.getCurrentRoundInfo();
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
         } else {
@@ -460,8 +606,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         const clean = normalizeAvatarId(msg.avatarId);
         if (clean === null || !msg.token) return;
         if (cluster.isCoordinator) {
-          store.setAvatar(msg.token, clean);
+          await store.setAvatar(msg.token, clean);
           game.setPlayerAvatar(client.playerId, clean);
+          send(ws, { type: 'AVATAR_UPDATED', avatarId: clean, avatarKey: null });
         } else {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_SET_AVATAR',
@@ -470,6 +617,31 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             avatarId:   clean,
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      case 'SET_CUSTOM_AVATAR': {
+        if (!client.playerId || client.role !== 'player' || !msg.token) return;
+        if (cluster.isCoordinator) {
+          const data = parseCustomAvatar(msg.dataUrl);
+          if (!data) {
+            send(ws, { type: 'ERROR', message: 'La foto no es válida o supera 200 KB.' });
+            return;
+          }
+          const avatarKey = await store.setCustomAvatar(msg.token, 'image/jpeg', data);
+          if (!avatarKey) throw new Error('La identidad del jugador no existe');
+          game.setPlayerCustomAvatar(client.playerId, avatarKey);
+          send(ws, { type: 'AVATAR_UPDATED', avatarId: game.getPlayer(client.playerId)?.avatarId ?? 0, avatarKey });
+        } else {
+          cluster.sendToCoordinator({
+            type: 'N_FORWARD_CUSTOM_AVATAR',
+            playerId: client.playerId,
+            token: msg.token,
+            dataUrl: msg.dataUrl,
+            originNode: NODE_ID,
+            lamport: game.clock.tick(),
           });
         }
         break;
@@ -564,7 +736,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         const token = msg.token;
         if (!token) { send(ws, { type: 'PROFILE', profile: null }); break; }
         if (cluster.isCoordinator) {
-          send(ws, { type: 'PROFILE', profile: store.getProfile(token) });
+          send(ws, { type: 'PROFILE', profile: await store.getProfile(token) });
         } else if (client.playerId) {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_PROFILE',
@@ -582,7 +754,11 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       // puntual, solo la DB del coordinador es la fuente de verdad.
       case 'GET_HALL_OF_FAME': {
         if (cluster.isCoordinator) {
-          send(ws, { type: 'HALL_OF_FAME', top: store.getHallOfFame(10), recentGames: store.getRecentGames(6) });
+          const [top, recentGames] = await Promise.all([
+            store.getHallOfFame(10),
+            store.getRecentGames(6),
+          ]);
+          send(ws, { type: 'HALL_OF_FAME', top, recentGames });
         } else if (client.playerId) {
           cluster.sendToCoordinator({
             type:       'N_FORWARD_HALL_OF_FAME',
@@ -593,6 +769,10 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         }
         break;
       }
+    }
+    } catch (error) {
+      console.error(`[${NODE_ID}] Falló el mensaje ${msg.type} del cliente:`, error);
+      send(ws, { type: 'ERROR', message: 'No se pudo completar la operación. Intenta nuevamente.' });
     }
   });
 
@@ -631,16 +811,33 @@ setInterval(() => {
   }
 }, 500);
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  const ip   = getLocalIP();
-  const role = cluster.isCoordinator ? 'COORDINADOR' : 'SEGUIDOR';
-  console.log(`\n[${NODE_ID}] ══════════════════════════════════════`);
-  console.log(`[${NODE_ID}]  ${role} | Puerto ${PORT}`);
-  if (PEER_URLS.length > 0) console.log(`[${NODE_ID}]  Peers: ${PEER_URLS.join(', ')}`);
-  console.log(`[${NODE_ID}]  Pantalla maestra: http://localhost:${PORT}/master`);
-  console.log(`[${NODE_ID}]  URL celulares:    http://${ip}:${PORT}/join`);
-  console.log(`[${NODE_ID}] ══════════════════════════════════════\n`);
-});
+async function bootstrap(): Promise<void> {
+  if (!DATABASE_URL && PEER_URLS.length > 0 && !ALLOW_SQLITE_CLUSTER) {
+    throw new Error('Un clúster requiere DATABASE_URL compartida. ALLOW_SQLITE_CLUSTER=1 se reserva para V&V local.');
+  }
+  await store.init();
+  const acquired = !cluster.isCoordinator
+    || await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
+  if (!acquired) {
+    throw new Error('El coordinador inicial no pudo adquirir la concesión de persistencia');
+  }
 
-// Conectar a los peers después de que el servidor HTTP esté listo
-setTimeout(() => cluster.connectToPeers(), 500);
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    const ip   = getLocalIP();
+    const role = cluster.isCoordinator ? 'COORDINADOR' : 'SEGUIDOR';
+    console.log(`\n[${NODE_ID}] ══════════════════════════════════════`);
+    console.log(`[${NODE_ID}]  ${role} | Puerto ${PORT} | DB ${store.mode.toUpperCase()}`);
+    if (PEER_URLS.length > 0) console.log(`[${NODE_ID}]  Peers: ${PEER_URLS.join(', ')}`);
+    console.log(`[${NODE_ID}]  Pantalla maestra: http://localhost:${PORT}/master`);
+    console.log(`[${NODE_ID}]  URL celulares:    http://${ip}:${PORT}/join`);
+    console.log(`[${NODE_ID}] ══════════════════════════════════════\n`);
+  });
+
+  setTimeout(() => cluster.connectToPeers(), 500);
+}
+
+void bootstrap().catch(async error => {
+  console.error(`[${NODE_ID}] No se pudo iniciar SiluNet:`, error);
+  await Promise.resolve(store.close()).catch(() => undefined);
+  process.exit(1);
+});

@@ -35,6 +35,7 @@ function cleanDbs(nodeIds) {
  * `nodes`: [{ id, port, peers: 'ws://localhost:PORT,...', coordinatorId }]
  */
 function spawnCluster(nodes, { verbose = false } = {}) {
+  const vvDatabaseUrl = process.env.VV_DATABASE_URL ?? '';
   return nodes.map(n => {
     const proc = spawn('node', ['dist/server.js'], {
       cwd: ROOT,
@@ -44,6 +45,10 @@ function spawnCluster(nodes, { verbose = false } = {}) {
         PORT: String(n.port),
         COORDINATOR_ID: n.coordinatorId,
         PEERS: n.peers,
+        // Los bots validan el motor distribuido sin depender de servicios
+        // externos. Producción exige PostgreSQL para un historial consistente.
+        DATABASE_URL: vvDatabaseUrl,
+        ALLOW_SQLITE_CLUSTER: vvDatabaseUrl ? '' : '1',
       },
       stdio: verbose ? 'pipe' : 'ignore',
     });

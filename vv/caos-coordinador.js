@@ -149,6 +149,20 @@ async function run() {
     }
     log('✓ los dos celulares que se cayeron con su nodo reconectaron y llegaron hasta el final');
 
+    if (process.env.VV_DATABASE_URL) {
+      const persistenceDeadline = Date.now() + 10000;
+      let persisted = false;
+      while (!persisted && Date.now() < persistenceDeadline) {
+        const response = waitForEvent(observer, 'HALL_OF_FAME', 2500).catch(() => null);
+        observer.send({ type: 'GET_HALL_OF_FAME' });
+        const hall = await response;
+        persisted = (hall?.recentGames?.length ?? 0) === 1;
+        if (!persisted) await sleep(250);
+      }
+      assert.ok(persisted, 'PostgreSQL no confirmó exactamente una partida tras el failover');
+      log('✓ PostgreSQL confirmó una sola partida después de los dos cambios de coordinador');
+    }
+
     log('TODO OK — el sistema tolera perder 2 de 3 nodos (incluido el coordinador dos veces) sin congelarse ni perder identidades');
   } catch (err) {
     failed = true;

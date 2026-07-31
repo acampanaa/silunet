@@ -4,7 +4,9 @@ Esta guía explica cómo descargar las dependencias y poner a correr el proyecto
 primero en **un solo nodo** (lo más rápido para probar el juego) y luego como
 **clúster de 3 nodos** (lo que demuestra los 4 ejes de sistemas distribuidos).
 
-No necesitas instalar bases de datos ni Redis: el estado vive en memoria.
+El estado de la partida vive en memoria y se replica entre nodos. El historial
+(perfiles, partidas y salón de la fama) usa una base PostgreSQL compartida; no
+se necesita Redis.
 
 ---
 
@@ -12,12 +14,12 @@ No necesitas instalar bases de datos ni Redis: el estado vive en memoria.
 
 Antes de empezar, instala en tu computadora:
 
-- **Node.js 18 o superior** (incluye `npm`). Verifica que esté listo:
+- **Node.js 22 o superior** (incluye `npm`). Verifica que esté listo:
   ```bash
   node --version
   npm --version
   ```
-  Si `node --version` muestra `v18.x` o mayor, estás bien.
+  Si `node --version` muestra `v22.x` o mayor, estás bien.
   Descarga: https://nodejs.org (elige la versión **LTS**).
 - **Git** (solo si vas a clonar el repositorio).
 
@@ -43,8 +45,8 @@ cd silunet
 
 ## 3. Instalar las dependencias
 
-Un solo comando descarga todo lo que el proyecto necesita (la librería `ws` de
-WebSockets y las herramientas de TypeScript):
+Un solo comando descarga todo lo que el proyecto necesita (`ws`, `pg` y las
+herramientas de TypeScript):
 
 ```bash
 npm install
@@ -65,6 +67,24 @@ npm run build
 ```
 
 Esto genera la carpeta `dist/` con el servidor listo para correr.
+
+### PostgreSQL local para desarrollo
+
+Con Docker Desktop iniciado:
+
+```bash
+docker compose up -d postgres
+```
+
+La conexión local será:
+
+```text
+postgresql://silunet:silunet_dev@localhost:5432/silunet
+```
+
+El esquema [`BDD.sql`](BDD.sql) se aplica automáticamente. Sin `DATABASE_URL`,
+un nodo único puede usar el respaldo SQLite; el clúster de tres nodos exige
+PostgreSQL para no mostrar historiales distintos.
 
 ---
 
@@ -112,9 +132,13 @@ npm run build
 Luego abre **3 terminales** y ejecuta un nodo en cada una. Cada nodo escucha en
 un puerto distinto y conoce a los otros dos vía `PEERS`.
 
+Los tres procesos deben recibir exactamente la misma `DATABASE_URL`.
+
 ### En Linux / macOS (bash)
 
 ```bash
+export DATABASE_URL='postgresql://silunet:silunet_dev@localhost:5432/silunet'
+
 # Terminal 1 — nodo 1 (coordinador inicial)
 NODE_ID=node1 PORT=3001 COORDINATOR_ID=node1 PEERS=ws://localhost:3002,ws://localhost:3003 node dist/server.js
 
@@ -128,6 +152,8 @@ NODE_ID=node3 PORT=3003 COORDINATOR_ID=node1 PEERS=ws://localhost:3001,ws://loca
 ### En Windows (PowerShell)
 
 ```powershell
+$env:DATABASE_URL="postgresql://silunet:silunet_dev@localhost:5432/silunet"
+
 # Terminal 1 — nodo 1 (coordinador inicial)
 $env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://localhost:3002,ws://localhost:3003"; node dist/server.js
 
@@ -159,6 +185,10 @@ sola máquina**. El día de la feria cada nodo corre en su propia laptop, todas
 conectadas al mismo router/AP propio (ver sección de despliegue). En ese caso
 `PEERS` debe llevar la **IP real de cada laptop en esa red**, no `localhost`:
 
+En las tres laptops configura además la misma `DATABASE_URL` de una instancia
+PostgreSQL accesible desde la LAN. Para conservar el historial si cae cualquier
+nodo, la base no debe depender exclusivamente de la laptop coordinadora.
+
 ```powershell
 # Laptop 1 (IP 192.168.50.10) — nodo 1
 $env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.11:3002,ws://192.168.50.12:3003"; node dist/server.js
@@ -187,6 +217,9 @@ URL del QR apunten a la IP del router propio, no a la otra red.
 | `PORT`           | Puerto HTTP/WebSocket donde escucha el nodo.               | `3001`            |
 | `COORDINATOR_ID` | Quién es el coordinador inicial al arrancar.               | `node1`           |
 | `PEERS`          | Lista (separada por comas) de URLs WS de los otros nodos.  | *(vacío)*         |
+| `DATABASE_URL`   | Conexión PostgreSQL compartida por todos los nodos.        | *(vacío)*         |
+| `DB_POOL_SIZE`   | Máximo de conexiones PostgreSQL por nodo.                  | `5`               |
+| `CLUSTER_ID`     | Identificador de la concesión de escritura.                | `silunet-main`    |
 
 > Si `PEERS` queda vacío, el nodo corre **solo** (modo de la sección 5).
 
@@ -200,6 +233,7 @@ URL del QR apunten a la IP del router propio, no a la otra red.
 | Compilar TypeScript → `dist/`   | `npm run build`    |
 | Compilar y arrancar (1 nodo)    | `npm run dev`      |
 | Arrancar lo ya compilado        | `npm start`        |
+| Levantar PostgreSQL local       | `docker compose up -d postgres` |
 
 ---
 
@@ -216,3 +250,5 @@ URL del QR apunten a la IP del router propio, no a la otra red.
   `localhost`. La IP correcta aparece impresa en la consola al arrancar.
 - **Los nodos no se conectan entre sí:** revisa que las URLs de `PEERS` apunten a
   los puertos correctos y que cada nodo tenga un `NODE_ID` y `PORT` distinto.
+- **El clúster exige `DATABASE_URL`:** define la misma conexión PostgreSQL en las
+  tres terminales y revisa credenciales, firewall y acceso de red.

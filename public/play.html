@@ -1041,11 +1041,14 @@
   // inyecta como mascara para que tome el color del tema.
   function pintarSilueta(caja, msg) {
     if (!caja) return;
-    if (msg.image) {
-      caja.innerHTML = '<span class="silueta-img" style="--silueta:url('' + msg.image + '')"></span>';
-    } else {
-      caja.innerHTML = msg.svg;
-    }
+    if (!msg.image) { caja.innerHTML = msg.svg; return; }
+    // Se arma por DOM y no concatenando HTML: la URL va a una custom property
+    // de CSS y meterla en un string con comillas anidadas es como se rompio antes.
+    caja.innerHTML = '';
+    const capa = document.createElement('span');
+    capa.className = 'silueta-img';
+    capa.style.setProperty('--silueta', 'url("' + msg.image + '")');
+    caja.appendChild(capa);
   }
 
   function paintRound(msg) {

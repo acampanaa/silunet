@@ -78,6 +78,13 @@
     }
     .wait-msg { color: var(--text-dim); font-size: 1rem; }
     .player-count { font-size: 1.5rem; font-weight: 700; color: var(--secondary); font-family: var(--font-mono); }
+    .wait-name-action {
+      width: auto; min-height: 40px; padding: 9px 14px;
+      border: 1px solid rgba(34,211,238,0.38); border-radius: 10px;
+      background: rgba(34,211,238,0.08); color: var(--secondary);
+      font: 700 0.78rem/1 var(--font-display); cursor: pointer;
+    }
+    .wait-name-action[hidden] { display: none; }
 
     /* ── Votación de categoría ── */
     #s-voting { justify-content: center; min-height: 100vh; gap: 14px; text-align: center; }
@@ -195,7 +202,7 @@
     .relajo-row b { font-size: 1.05rem; color: var(--secondary); }
 
     /* Timer */
-    /* SiluStack en celular: tablero compacto + controles táctiles del piloto. */
+    /* SiluStack en celular: tablero individual + controles táctiles propios. */
     .stack-mobile {
       display:none; width:100%; padding:14px; overflow:hidden;
       background:linear-gradient(145deg,rgba(34,211,238,.07),transparent 42%),rgba(8,11,25,.9);
@@ -227,6 +234,13 @@
     .stack-mobile-stat span { color:var(--text-faint); font-size:.55rem; text-transform:uppercase; letter-spacing:.07em; }
     .stack-mobile-pilot { color:var(--text-dim); font-size:.78rem; line-height:1.35; text-align:center; }
     .stack-mobile-pilot strong { display:block; color:var(--tertiary); font-size:.9rem; }
+    .stack-mobile-pilot.ready { color:var(--tertiary); }
+    .stack-mobile-pilot.locked { color:var(--secondary); }
+    .stack-mobile-pilot.eliminated { color:#fecaca; }
+    .stack-mobile.danger { border-color:rgba(239,68,68,.7); box-shadow:0 0 34px rgba(239,68,68,.16),inset 0 0 28px rgba(239,68,68,.04); }
+    .stack-mobile.eliminated { border-color:rgba(239,68,68,.42); }
+    .stack-mini-grid.danger { border-color:var(--error); box-shadow:0 0 32px rgba(239,68,68,.24),inset 0 0 20px rgba(0,0,0,.72); }
+    .stack-mini-grid.eliminated { filter:saturate(.4) brightness(.68); }
     .stack-mobile-keys { display:none; flex-wrap:wrap; align-items:center; justify-content:center; gap:5px; color:var(--text-faint); font:650 .58rem/1 var(--font-mono); text-transform:uppercase; }
     .stack-mobile-keys kbd { min-width:24px; height:24px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center;
       border:1px solid rgba(34,211,238,.35); border-bottom-width:3px; border-radius:6px; background:#11172b; color:var(--secondary); font:800 .66rem/1 var(--font-mono); }
@@ -439,6 +453,34 @@
     }
     .pf-avatar-big .avatar { width: 96px !important; height: 96px !important; }
     .pf-name { font-size: 1.5rem; font-weight: 800; text-align: center; overflow-wrap: anywhere; }
+    .pf-name-heading { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+    .pf-name-edit {
+      border: 0; background: transparent; color: var(--secondary); cursor: pointer;
+      font: 700 0.74rem/1.2 var(--font-display); text-decoration: underline;
+      text-decoration-color: rgba(34,211,238,0.45); text-underline-offset: 3px;
+    }
+    .pf-name-editor {
+      width: 100%; margin-top: 12px; padding: 12px;
+      border: 1px solid rgba(34,211,238,0.24); border-radius: 12px;
+      background: rgba(15,15,26,0.68); text-align: left;
+    }
+    .pf-name-editor[hidden] { display: none; }
+    .pf-name-label { display: block; margin-bottom: 7px; color: var(--text-dim);
+      font: 700 0.7rem/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+    .pf-name-input {
+      width: 100%; min-height: 44px; padding: 10px 12px;
+      border: 1px solid var(--border-soft); border-radius: 10px;
+      background: var(--bg); color: var(--text); outline: none;
+      font: 600 0.95rem/1.2 var(--font-display); text-align: center;
+    }
+    .pf-name-input:focus { border-color: var(--secondary); box-shadow: 0 0 0 3px rgba(34,211,238,0.12); }
+    .pf-name-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+    .pf-name-save, .pf-name-cancel { min-height: 40px; border-radius: 10px; cursor: pointer; font: 700 0.78rem/1 var(--font-display); }
+    .pf-name-save { border: 0; background: var(--primary); color: #fff; }
+    .pf-name-cancel { border: 1px solid var(--border-soft); background: transparent; color: var(--text-dim); }
+    .pf-name-status { min-height: 18px; margin-top: 7px; color: var(--text-faint); font-size: 0.74rem; text-align: center; }
+    .pf-name-status.error { color: var(--error); }
+    .pf-name-status.success { color: var(--tertiary); }
     .pf-hero .pf-since { margin-bottom: 0; }
     .pf-name .ico { width: 1.6rem; height: 1.6rem; color: var(--primary); }
     .pf-since { color: var(--text-faint); font-size: 0.8rem; margin-bottom: 18px; font-family: var(--font-mono); }
@@ -456,6 +498,7 @@
     .pf-medals .ico { width: 1.15rem; height: 1.15rem; }
     .pf-recientes-title { font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase;
       letter-spacing: 0.08em; color: var(--text-faint); margin-bottom: 8px; }
+    .pf-avatar-title { text-align: center; }
     .pf-reciente {
       display: flex; align-items: center; gap: 10px;
       background: var(--bg); border-radius: 8px; padding: 9px 12px;
@@ -494,7 +537,9 @@
       transition: border-color 0.15s, background 0.15s, transform 0.1s;
     }
     .photo-action:active { transform: scale(0.97); }
-    .photo-action:focus-visible, .avatar-opt:focus-visible, .modal-close:focus-visible {
+    .photo-action:focus-visible, .avatar-opt:focus-visible, .modal-close:focus-visible,
+    .wait-name-action:focus-visible, .pf-name-edit:focus-visible, .pf-name-save:focus-visible,
+    .pf-name-cancel:focus-visible {
       outline: 2px solid var(--secondary); outline-offset: 2px;
     }
     .visually-hidden {
@@ -551,6 +596,7 @@
 <div id="s-waiting" class="screen">
   <img class="logo" src="/assets/silunet-wordmark-compact.png" alt="SILUNET" width="1200" height="294" fetchpriority="high">
   <p class="wait-msg" id="w-greet"></p>
+  <button class="wait-name-action" id="w-change-name" type="button" onclick="openProfileForName()" hidden>Cambiar nombre</button>
   <p class="wait-msg">Esperando que empiece la partida...</p>
   <div class="player-count" id="w-count">0 jugadores</div>
 </div>
@@ -603,7 +649,7 @@
 
   <section class="stack-mobile" id="p-stack" aria-label="Controles de SiluStack">
     <div class="stack-mobile-layout">
-      <div class="stack-mini-grid" id="p-stack-grid" role="img" aria-label="Tablero compartido"></div>
+      <div class="stack-mini-grid" id="p-stack-grid" role="img" aria-label="Tu tablero de SiluStack"></div>
       <div class="stack-mobile-meta">
         <div class="stack-mobile-stats">
           <div class="stack-mobile-stat"><b id="p-stack-level">1</b><span>Nivel</span></div>
@@ -611,7 +657,7 @@
           <div class="stack-mobile-stat"><b id="p-stack-combo">0</b><span>Combo</span></div>
           <div class="stack-mobile-stat"><b id="p-stack-next">—</b><span>Siguiente</span></div>
         </div>
-        <p class="stack-mobile-pilot" id="p-stack-pilot" role="status" aria-live="polite">Adivina primero para pilotar.</p>
+        <p class="stack-mobile-pilot" id="p-stack-pilot" role="status" aria-live="polite">Responde la silueta para controlar tu pieza.</p>
         <div class="stack-mobile-keys" id="p-stack-keys" aria-disabled="true">
           <kbd data-stack-player-key="KeyA">A</kbd><span>izq.</span>
           <kbd data-stack-player-key="KeyW">W</kbd><span>rotar</span>
@@ -672,11 +718,13 @@
 </div>
 
 <script>
-  const nick = sessionStorage.getItem('silunet_nick');
-  if (!nick) { window.location.href = '/join'; }
+  const sessionNick = sessionStorage.getItem('silunet_nick');
+  const storedNick = localStorage.getItem('silunet_token') ? localStorage.getItem('silunet_nick') : null;
+  const initialNick = sessionNick || storedNick;
+  if (!initialNick) { window.location.replace('/join'); }
 
   let myPlayerId  = null;
-  let myNick      = nick;
+  let myNick      = initialNick || '';
   let myScore     = 0;
   let totalTime   = 24;
   let solved      = false;
@@ -692,6 +740,8 @@
   let myAvatar    = window.SilunetAvatars.normalizeAvatarId(localStorage.getItem('silunet_avatar'));
   let myAvatarKey = localStorage.getItem('silunet_avatar_key') || null;
   let avatarUploadPending = false;
+  let nameUpdatePending = false;
+  let openNameEditorAfterProfile = false;
 
   // Eje 2: reloj de Lamport del cliente
   let lamport = 0;
@@ -729,7 +779,7 @@
       // Eje 4: si veníamos de una caída mid-partida, este mismo token es lo que
       // le permite al servidor reconocernos y devolvernos el puntaje acumulado.
       const token = localStorage.getItem('silunet_token');
-      send({ type: 'JOIN', nick, token, avatarId: myAvatar });
+      send({ type: 'JOIN', nick: myNick, token, avatarId: myAvatar });
       clearInterval(pingTimer);
       // Eje 4: heartbeat del celular al servidor cada 1000 ms
       pingTimer = setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
@@ -777,6 +827,7 @@
       case 'RANKING':         handleRanking(msg);       break;
       case 'PROFILE':         handleProfile(msg);       break;
       case 'AVATAR_UPDATED':  handleAvatarUpdated(msg); break;
+      case 'IDENTITY_UPDATED': handleIdentityUpdated(msg); break;
       case 'PLAYER_LEFT':     showNotif(`${msg.nick} se desconectó`, 'info', 2500); break;
       case 'ERROR':           handleServerError(msg); break;
     }
@@ -803,7 +854,9 @@
     const t = document.getElementById('p-timer-row');
     if (t) t.style.display = '';
     const stack = document.getElementById('p-stack');
-    if (stack) stack.classList.remove('show');
+    if (stack) stack.classList.remove('show', 'danger', 'eliminated');
+    const stackGrid = document.getElementById('p-stack-grid');
+    if (stackGrid) stackGrid.classList.remove('danger', 'eliminated');
     currentStackState = null;
   }
 
@@ -838,9 +891,11 @@
       if (greet) greet.textContent = `Reconectado, ${myNick} — sigues en la partida`;
     } else {
       showScreen('s-waiting');
-      // "¡Hola de nuevo!" si el servidor reconoció el token de este celular
-      if (greet) greet.textContent = msg.returning ? `¡Hola de nuevo, ${myNick}!` : `¡Bienvenido, ${myNick}!`;
+      // La identidad recurrente entra sin repetir el formulario de registro.
+      if (greet) greet.textContent = msg.returning ? `Bienvenido de vuelta, ${myNick}` : `¡Bienvenido, ${myNick}!`;
     }
+    const changeName = document.getElementById('w-change-name');
+    if (changeName) changeName.hidden = !(msg.returning || msg.reconnected);
     setCount(msg.playerCount);
     // v2: ya hay identidad → habilitar el botón de perfil
     document.getElementById('profile-fab').style.display = 'flex';
@@ -868,73 +923,96 @@
     document.getElementById('p-rj-bonus').textContent = '+' + msg.bonusPerSolver;
   }
 
+  function myStackBoard(state = currentStackState) {
+    return state?.boards?.find(function(board) { return board.playerId === myPlayerId; }) || null;
+  }
+
   function handleStackState(msg) {
     const state = msg.state;
+    const board = myStackBoard(state);
     currentMode = 'silustack';
     currentStackState = state;
     document.getElementById('s-playing').classList.add('stack-mode');
     document.getElementById('p-relajo').classList.remove('show');
     document.getElementById('p-timer-row').style.display = '';
-    document.getElementById('p-stack').classList.add('show');
-    document.getElementById('p-round').textContent = 'SiluStack · Pieza ' + (state.pieces + 1);
+    const stackPanel = document.getElementById('p-stack');
+    stackPanel.classList.add('show');
+    document.getElementById('p-round').textContent = 'SiluStack · Pieza ' + state.round;
 
-    const active = new Map((state.activeCells || []).map(function(cell) {
-      return [cell[0] + ':' + cell[1], state.active ? state.active.color : 0];
-    }));
     const frag = document.createDocumentFragment();
+    const active = new Map((board?.activeCells || []).map(function(cell) {
+      return [cell[0] + ':' + cell[1], board?.active ? board.active.color : 0];
+    }));
     for (let y = 0; y < state.height; y++) {
       for (let x = 0; x < state.width; x++) {
         const cell = document.createElement('span');
         const activeColor = active.get(x + ':' + y);
-        const value = activeColor || state.board[y][x] || 0;
+        const value = activeColor || board?.board?.[y]?.[x] || 0;
         cell.className = 'stack-mini-cell' + (value ? ' c' + value : '') + (activeColor ? ' active' : '');
         frag.appendChild(cell);
       }
     }
     const stackGrid = document.getElementById('p-stack-grid');
     stackGrid.replaceChildren(frag);
-    stackGrid.setAttribute('aria-label', 'Tablero SiluStack: ' + state.lines + ' líneas, nivel ' + state.level);
-    document.getElementById('p-stack-level').textContent = state.level;
-    document.getElementById('p-stack-lines').textContent = state.lines;
-    document.getElementById('p-stack-combo').textContent = state.combo;
-    document.getElementById('p-stack-next').textContent = state.nextKind;
 
-    const isPilot = Boolean(state.active && state.pilotId === myPlayerId);
+    const highestRow = board
+      ? board.board.findIndex(function(row) { return row.some(function(cell) { return cell !== 0; }); })
+      : -1;
+    const danger = Boolean(board && !board.eliminated && highestRow >= 0 && highestRow <= 3);
+    stackPanel.classList.toggle('danger', danger);
+    stackPanel.classList.toggle('eliminated', Boolean(board?.eliminated));
+    stackGrid.classList.toggle('danger', danger);
+    stackGrid.classList.toggle('eliminated', Boolean(board?.eliminated));
+    stackGrid.setAttribute('aria-label', board
+      ? 'Tu tablero SiluStack: ' + board.lines + ' líneas, nivel ' + board.level + (board.eliminated ? ', eliminado' : '')
+      : 'Sin tablero activo en esta partida');
+
+    document.getElementById('p-stack-level').textContent = board?.level ?? '—';
+    document.getElementById('p-stack-lines').textContent = board?.lines ?? '—';
+    document.getElementById('p-stack-combo').textContent = board?.combo ?? '—';
+    document.getElementById('p-stack-next').textContent = board?.nextKind ?? '—';
+
+    const canControl = Boolean(board?.active && board.unlocked && !board.locked && !board.eliminated);
     const pilot = document.getElementById('p-stack-pilot');
+    pilot.className = 'stack-mobile-pilot';
     pilot.replaceChildren();
-    if (isPilot) {
+    if (!board) {
+      pilot.textContent = 'Te uniste como espectador. Jugarás desde la próxima partida.';
+    } else if (board.eliminated) {
+      pilot.classList.add('eliminated');
+      pilot.textContent = 'Tu tablero se desbordó. Observa quién sobrevive.';
+    } else if (board.locked || !board.active) {
+      pilot.classList.add('locked');
+      pilot.textContent = 'Pieza fijada. Espera la siguiente silueta.';
+    } else if (canControl) {
+      pilot.classList.add('ready');
       const label = document.createElement('span');
-      label.textContent = 'Tú controlas esta pieza';
-      const name = document.createElement('strong');
-      name.textContent = 'Muévela o suéltala';
-      pilot.append(label, name);
-    } else if (state.pilotNick) {
-      const label = document.createElement('span');
-      label.textContent = 'Pilota';
-      const name = document.createElement('strong');
-      name.textContent = state.pilotNick;
-      pilot.append(label, name);
-    } else if (state.active) {
-      pilot.textContent = 'Adivina primero para tomar el control.';
+      label.textContent = 'Control habilitado';
+      const detail = document.createElement('strong');
+      detail.textContent = 'Coloca tu pieza · ' + state.survivors + ' en juego';
+      pilot.append(label, detail);
     } else {
-      pilot.textContent = 'Preparando la siguiente pieza...';
+      pilot.textContent = danger
+        ? 'Peligro: responde ahora para ordenar tu tablero.'
+        : 'Responde la silueta para controlar tu pieza.';
     }
 
     const controls = document.getElementById('p-stack-controls');
-    controls.classList.toggle('show', isPilot);
+    controls.classList.toggle('show', canControl);
     controls.querySelectorAll('button').forEach(function(button) {
-      button.disabled = !isPilot;
+      button.disabled = !canControl;
     });
     const keys = document.getElementById('p-stack-keys');
-    keys.classList.toggle('ready', isPilot);
-    keys.setAttribute('aria-disabled', String(!isPilot));
-    if (isPilot && window.matchMedia('(pointer:fine)').matches && document.activeElement === document.getElementById('p-input')) {
+    keys.classList.toggle('ready', canControl);
+    keys.setAttribute('aria-disabled', String(!canControl));
+    if (board?.eliminated) disableInput();
+    if (canControl && window.matchMedia('(pointer:fine)').matches && document.activeElement === document.getElementById('p-input')) {
       document.getElementById('p-input').blur();
     }
   }
-
   function submitStackAction(action) {
-    if (!currentStackState || currentStackState.pilotId !== myPlayerId) return;
+    const board = myStackBoard();
+    if (!board?.active || !board.unlocked || board.locked || board.eliminated) return;
     send({ type: 'STACK_ACTION', action: action });
   }
 
@@ -942,7 +1020,8 @@
   let lastStackKeyAt = 0;
   document.addEventListener('keydown', function(event) {
     const action = stackKeyboardActions[event.code];
-    if (!action || currentMode !== 'silustack' || currentStackState?.pilotId !== myPlayerId || !currentStackState.active) return;
+    const board = myStackBoard();
+    if (!action || currentMode !== 'silustack' || !board?.active || !board.unlocked || board.locked || board.eliminated) return;
     if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select, button, [contenteditable="true"]')) return;
     if (event.repeat && (action === 'rotate' || action === 'drop')) return;
     const now = performance.now();
@@ -1095,7 +1174,9 @@
     prepareHintRound(msg, true);
     document.getElementById('countdown-overlay').classList.remove('show');
     updateTimer(msg.timeLeft, msg.totalTime);
-    enableInput();
+    const stackBoard = currentMode === 'silustack' ? myStackBoard() : null;
+    if (currentMode === 'silustack' && (!stackBoard || stackBoard.eliminated)) disableInput();
+    else enableInput();
   }
 
   function handleTick(msg) {
@@ -1181,7 +1262,12 @@
     // llegan en el RANKING al final de la ronda.
     if (msg.playerId === myPlayerId) {
       const penalty = msg.usedHint ? ' · pista: -20%' : '';
-      showNotif(`¡Correcto! Llegaste #${msg.position}${penalty} · puntos al cierre  [L=${msg.lamport}]`, 'success', 0);
+      showNotif(
+        currentMode === 'silustack'
+          ? `¡Correcto! Control desbloqueado · posición #${msg.position}${penalty}`
+          : `¡Correcto! Llegaste #${msg.position}${penalty} · puntos al cierre  [L=${msg.lamport}]`,
+        'success', 0
+      );
       disableInput();
       solved = true;
       roundActive = false;
@@ -1206,15 +1292,25 @@
   function handleRoundEnd(msg) {
     if (currentMode === 'silustack') {
       roundActive = false;
-      const cleared = currentStackState && currentStackState.lastClear > 0;
-      showNotif(
-        msg.solvers.length > 0
-          ? (cleared ? 'Pieza encajada y línea completada.' : 'Pieza encajada. Siguiente silueta...')
-          : 'Nadie acertó: la pieza quedó corrupta.',
-        msg.solvers.length > 0 ? 'success' : 'error',
-        1600
-      );
-      AudioFX.roundEnd(msg.solvers.length > 0);
+      const board = myStackBoard();
+      const solvedThisRound = solved;
+      let text = 'Preparando la siguiente silueta...';
+      let kind = 'info';
+      if (board?.eliminated) {
+        text = 'Tu tablero se desbordó. Quedas como espectador.';
+        kind = 'error';
+      } else if (board?.lastClear > 0) {
+        text = board.lastClear + ' línea' + (board.lastClear === 1 ? '' : 's') + ' limpiada' + (board.lastClear === 1 ? '' : 's') + ' · combo x' + board.combo;
+        kind = 'success';
+      } else if (solvedThisRound) {
+        text = 'Pieza colocada. Siguiente silueta...';
+        kind = 'success';
+      } else {
+        text = 'Sin acierto: recibiste una pieza roja.';
+        kind = 'error';
+      }
+      showNotif(text, kind, 1600);
+      AudioFX.roundEnd(solvedThisRound);
       return;
     }
     roundActive = false;
@@ -1263,6 +1359,11 @@
   const MEDAL_POS = { oro: 1, plata: 2, bronce: 3 };
 
   // ── v2: Perfil ───────────────────────────────────────────────────────────────
+  function openProfileForName() {
+    openNameEditorAfterProfile = true;
+    openProfile();
+  }
+
   function openProfile() {
     const token = localStorage.getItem('silunet_token');
     document.getElementById('pf-body').innerHTML = '<p class="pf-empty">Cargando...</p>';
@@ -1272,6 +1373,7 @@
   }
 
   function closeProfile() {
+    openNameEditorAfterProfile = false;
     document.getElementById('profile-modal').classList.remove('active');
     document.body.classList.remove('modal-open');
   }
@@ -1316,7 +1418,19 @@
     body.innerHTML = `
       <div class="pf-hero">
         <div class="pf-avatar-big" id="pf-avatar-big">${window.SilunetAvatars.avatarHTML(myAvatar, myAvatarKey, '96px', 'Foto de perfil')}</div>
-        <h2 class="pf-name" id="profile-title">${escapeHTML(p.nick)}</h2>
+        <div class="pf-name-heading">
+          <h2 class="pf-name" id="profile-title">${escapeHTML(p.nick)}</h2>
+          <button class="pf-name-edit" id="pf-name-edit" type="button" onclick="beginProfileNameEdit()" aria-expanded="false">Cambiar nombre</button>
+        </div>
+        <div class="pf-name-editor" id="pf-name-editor" hidden>
+          <label class="pf-name-label" for="pf-nick-input">Nuevo nombre</label>
+          <input class="pf-name-input" id="pf-nick-input" type="text" maxlength="20" autocomplete="nickname" value="${escapeHTML(p.nick)}">
+          <div class="pf-name-actions">
+            <button class="pf-name-save" id="pf-name-save" type="button" onclick="saveProfileName()">Guardar</button>
+            <button class="pf-name-cancel" type="button" onclick="cancelProfileNameEdit()">Cancelar</button>
+          </div>
+        </div>
+        <p class="pf-name-status" id="pf-name-status" role="status" aria-live="polite"></p>
         <div class="pf-since">Jugando desde ${desde}</div>
       </div>
       <p class="pf-recientes-title">Foto personal</p>
@@ -1327,7 +1441,7 @@
       <input class="visually-hidden" id="pf-camera-input" type="file" accept="image/*" capture="user" aria-label="Tomar foto de perfil">
       <input class="visually-hidden" id="pf-gallery-input" type="file" accept="image/*" aria-label="Elegir foto de perfil desde la galería">
       <p class="photo-status" id="pf-photo-status" role="status" aria-live="polite">Se recorta al centro y se guarda en tamaño reducido.</p>
-      <p class="pf-recientes-title">O elige un avatar</p>
+      <p class="pf-recientes-title pf-avatar-title">O elige un avatar</p>
       <div class="avatar-grid" id="pf-avatar-grid"></div>
       <div class="pf-stats">
         <div class="pf-stat"><span class="lbl">${ICON.trophy('ico-gold')} Partidas ganadas</span><span class="v">${p.partidasGanadas}</span></div>
@@ -1347,6 +1461,84 @@
     `;
     renderAvatarPicker();
     bindPhotoInputs();
+    bindProfileNameEditor();
+    if (openNameEditorAfterProfile) {
+      openNameEditorAfterProfile = false;
+      beginProfileNameEdit();
+    }
+  }
+
+  function bindProfileNameEditor() {
+    const input = document.getElementById('pf-nick-input');
+    if (!input) return;
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') saveProfileName();
+      if (event.key === 'Escape') cancelProfileNameEdit();
+    });
+  }
+
+  function beginProfileNameEdit() {
+    const editor = document.getElementById('pf-name-editor');
+    const button = document.getElementById('pf-name-edit');
+    const input = document.getElementById('pf-nick-input');
+    if (!editor || !input) return;
+    editor.hidden = false;
+    if (button) button.setAttribute('aria-expanded', 'true');
+    input.value = myNick;
+    input.disabled = false;
+    input.focus();
+    input.select();
+    setProfileNameStatus('');
+  }
+
+  function cancelProfileNameEdit() {
+    const editor = document.getElementById('pf-name-editor');
+    const button = document.getElementById('pf-name-edit');
+    if (editor) editor.hidden = true;
+    if (button) button.setAttribute('aria-expanded', 'false');
+    setProfileNameStatus('');
+  }
+
+  function setProfileNameStatus(text, kind = '') {
+    const status = document.getElementById('pf-name-status');
+    if (!status) return;
+    status.textContent = text;
+    status.className = 'pf-name-status' + (kind ? ' ' + kind : '');
+  }
+
+  function saveProfileName() {
+    const input = document.getElementById('pf-nick-input');
+    const saveButton = document.getElementById('pf-name-save');
+    const nick = input?.value.trim().slice(0, 20) || '';
+    const token = localStorage.getItem('silunet_token');
+    if (!nick) { setProfileNameStatus('Escribe un nombre válido.', 'error'); input?.focus(); return; }
+    if (!token) { setProfileNameStatus('No se pudo verificar tu identidad.', 'error'); return; }
+    if (nick === myNick) { cancelProfileNameEdit(); return; }
+    nameUpdatePending = true;
+    if (input) input.disabled = true;
+    if (saveButton) saveButton.disabled = true;
+    setProfileNameStatus('Guardando…');
+    send({ type: 'SET_NICK', token, nick });
+  }
+
+  function handleIdentityUpdated(msg) {
+    nameUpdatePending = false;
+    myNick = msg.nick;
+    localStorage.setItem('silunet_nick', myNick);
+    sessionStorage.setItem('silunet_nick', myNick);
+    const greet = document.getElementById('w-greet');
+    if (greet) greet.textContent = `Bienvenido de vuelta, ${myNick}`;
+    const title = document.getElementById('profile-title');
+    if (title) title.textContent = myNick;
+    const input = document.getElementById('pf-nick-input');
+    if (input) { input.value = myNick; input.disabled = false; }
+    const saveButton = document.getElementById('pf-name-save');
+    if (saveButton) saveButton.disabled = false;
+    const editor = document.getElementById('pf-name-editor');
+    if (editor) editor.hidden = true;
+    const editButton = document.getElementById('pf-name-edit');
+    if (editButton) editButton.setAttribute('aria-expanded', 'false');
+    setProfileNameStatus('Nombre actualizado.', 'success');
   }
 
   // Selector de avatar dentro del perfil. Al elegir uno se manda SET_AVATAR:
@@ -1503,6 +1695,14 @@
     if (avatarUploadPending) {
       avatarUploadPending = false;
       setPhotoStatus(msg.message, 'error');
+    }
+    if (nameUpdatePending) {
+      nameUpdatePending = false;
+      const input = document.getElementById('pf-nick-input');
+      if (input) input.disabled = false;
+      const saveButton = document.getElementById('pf-name-save');
+      if (saveButton) saveButton.disabled = false;
+      setProfileNameStatus(msg.message, 'error');
     }
     showNotif(msg.message, 'error');
   }

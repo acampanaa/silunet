@@ -458,6 +458,28 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       game.castVote(msg.playerId, msg.kind, msg.option);
       break;
 
+    case 'N_FORWARD_SET_NICK': {
+      if (!cluster.isCoordinator) return;
+      const player = game.getPlayer(msg.playerId);
+      const nick = msg.nick.trim().slice(0, 20);
+      if (!player || player.token !== msg.token || !nick) {
+        cluster.sendToPeer(msg.originNode, {
+          type: 'N_SEND_TO', playerId: msg.playerId,
+          payload: { type: 'ERROR', message: 'No se pudo actualizar el nombre.' },
+          lamport: game.clock.tick(),
+        });
+        return;
+      }
+      await store.updateIdentity(msg.token, nick);
+      cluster.sendToPeer(msg.originNode, {
+        type: 'N_SEND_TO', playerId: msg.playerId,
+        payload: { type: 'IDENTITY_UPDATED', nick },
+        lamport: game.clock.tick(),
+      });
+      game.setPlayerNick(msg.playerId, nick);
+      break;
+    }
+
     // Seguidor reenvía el cambio de avatar de su jugador al coordinador
     case 'N_FORWARD_SET_AVATAR':
       if (!cluster.isCoordinator) return;
@@ -614,6 +636,32 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             avatarId:   msg.avatarId,
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      case 'SET_NICK': {
+        if (!client.playerId || client.role !== 'player' || !msg.token) return;
+        const nick = msg.nick.trim().slice(0, 20);
+        if (!nick) { send(ws, { type: 'ERROR', message: 'Escribe un nombre válido.' }); break; }
+        if (cluster.isCoordinator) {
+          const player = game.getPlayer(client.playerId);
+          if (!player || player.token !== msg.token) {
+            send(ws, { type: 'ERROR', message: 'No se pudo verificar tu identidad.' });
+            break;
+          }
+          await store.updateIdentity(msg.token, nick);
+          send(ws, { type: 'IDENTITY_UPDATED', nick });
+          game.setPlayerNick(client.playerId, nick);
+        } else {
+          cluster.sendToCoordinator({
+            type: 'N_FORWARD_SET_NICK',
+            playerId: client.playerId,
+            token: msg.token,
+            nick,
+            originNode: NODE_ID,
+            lamport: game.clock.tick(),
           });
         }
         break;

@@ -253,6 +253,11 @@
   <script>
     // v2: si este celular ya jugó antes, pre-llenar su apodo (identidad persistente)
     const savedNick = localStorage.getItem('silunet_nick');
+    const savedToken = localStorage.getItem('silunet_token');
+    if (savedNick && savedToken) {
+      sessionStorage.setItem('silunet_nick', savedNick);
+      window.location.replace('/play');
+    }
     if (savedNick) {
       const inp = document.getElementById('nick');
       inp.value = savedNick;

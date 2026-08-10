@@ -21,20 +21,30 @@ export interface StackPiece {
   color: number;
 }
 
-export interface StackState {
-  width: number;
-  height: number;
+export interface StackBoardState {
+  playerId: string;
+  nick: string;
   board: number[][];
   active: StackPiece | null;
   activeCells: Array<[number, number]>;
   nextKind: StackPieceKind;
-  pilotId?: string;
-  pilotNick?: string;
   pieces: number;
   lines: number;
   combo: number;
   level: number;
   lastClear: number;
+  unlocked: boolean;
+  locked: boolean;
+  eliminated: boolean;
+  eliminatedAt?: number;
+}
+
+export interface StackState {
+  width: number;
+  height: number;
+  round: number;
+  survivors: number;
+  boards: StackBoardState[];
 }
 
 export interface Player {
@@ -223,6 +233,7 @@ export type S2C =
   // v2: perfil persistente solicitado por el celular (null si el token no existe)
   | { type: 'PROFILE'; profile: Perfil | null }
   | { type: 'AVATAR_UPDATED'; avatarId: number; avatarKey: string | null }
+  | { type: 'IDENTITY_UPDATED'; nick: string }
   // v2.1: salón de la fama solicitado por la pantalla maestra
   | { type: 'HALL_OF_FAME'; top: HallOfFameEntry[]; recentGames: RecentGame[] }
   // Eje 4: salud del clúster empujada a la pantalla maestra (sin polling).
@@ -249,6 +260,7 @@ export type N2N =
   | { type: 'N_FORWARD_JOIN';  playerId: string; nick: string; token: string | null; avatarId?: number; originNode: string; lamport: number }
   // Cambio de avatar: el seguidor lo reenvía al coordinador (solo él tiene DB)
   | { type: 'N_FORWARD_SET_AVATAR'; playerId: string; token: string; avatarId: number; originNode: string; lamport: number }
+  | { type: 'N_FORWARD_SET_NICK'; playerId: string; token: string; nick: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_CUSTOM_AVATAR'; playerId: string; token: string; dataUrl: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
@@ -268,6 +280,7 @@ export type N2N =
 export type C2S =
   | { type: 'JOIN'; nick: string; token?: string | null; avatarId?: number }  // v2: token persistente opcional
   | { type: 'SET_AVATAR'; token: string; avatarId: number }  // cambiar avatar desde el perfil
+  | { type: 'SET_NICK'; token: string; nick: string }
   | { type: 'SET_CUSTOM_AVATAR'; token: string; dataUrl: string }
   | { type: 'MASTER_JOIN' }
   | { type: 'GUESS'; word: string; lamport: number }

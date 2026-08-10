@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
-import { GamePhase, GameMode, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty, StackState, StackPiece, StackPieceKind, StackAction } from './types';
+import { GamePhase, GameMode, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty, StackState, StackBoardState, StackPiece, StackPieceKind, StackAction } from './types';
 import { getRandomRounds, getMixedQueue, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
@@ -44,7 +44,7 @@ const RELAJO_GAP_BETWEEN     = 1;  // pausa entre siluetas (el clásico usa 4)
 // con N = total de aciertos de la ronda. Primero (pos=1) → POINTS_TOP.
 // ── SiluStack ────────────────────────────────────────────────────────────────
 // Tablero autoritativo replicado por eventos discretos. Cada silueta genera una
-// pieza; el primer acierto se convierte en piloto.
+// pieza por jugador; cada acierto desbloquea únicamente el tablero propio.
 const STACK_WIDTH = 10;
 const STACK_HEIGHT = 16;
 const STACK_QUEUE_SIZE = 40;
@@ -126,7 +126,7 @@ export class Game extends EventEmitter {
   private mode: GameMode = 'clasico';
   private sharedClock = 0;   // segundos que le quedan de vida a la partida
   private cleared = 0;
-  private stack?: StackState;       // tablero compartido de SiluStack
+  private stack?: StackState;       // tableros individuales de SiluStack
 
   // Votación de categoría (fase 'voting'): un jugador puede cambiar su voto
   // mientras dure la ventana, por eso es un mapa (no un contador directo).
@@ -159,9 +159,26 @@ export class Game extends EventEmitter {
   getPlayerCount() { return [...this.players.values()].filter(p => p.connected !== false).length; }
   getPlayer(id: string) { return this.players.get(id); }
 
+  private rankedPlayers(): Player[] {
+    const boards = new Map((this.stack?.boards ?? []).map(board => [board.playerId, board]));
+    return [...this.players.values()].sort((a, b) => {
+      if (this.mode === 'silustack' && this.stack) {
+        const boardA = boards.get(a.id);
+        const boardB = boards.get(b.id);
+        if (boardA && boardB) {
+          if (boardA.eliminated !== boardB.eliminated) return boardA.eliminated ? 1 : -1;
+          if (boardA.eliminatedAt !== boardB.eliminatedAt) return (boardB.eliminatedAt ?? Infinity) - (boardA.eliminatedAt ?? Infinity);
+          if (boardA.lines !== boardB.lines) return boardB.lines - boardA.lines;
+        } else if (boardA || boardB) {
+          return boardA ? -1 : 1;
+        }
+      }
+      return b.score - a.score;
+    });
+  }
+
   getRanking(): RankEntry[] {
-    return [...this.players.values()]
-      .sort((a, b) => b.score - a.score)
+    return this.rankedPlayers()
       .map(p => ({ nick: p.nick, score: p.score, avatarId: p.avatarId ?? 0, avatarKey: p.avatarKey }));
   }
 
@@ -174,7 +191,7 @@ export class Game extends EventEmitter {
     if (!this.round || this.phase !== 'playing') return null;
     return {
       roundNumber: this.currentRoundIndex + 1,
-      totalRounds: this.mode === 'silustack' ? (this.stack?.pieces ?? 0) + 1 : this.rounds.length,
+      totalRounds: this.mode === 'silustack' ? (this.stack?.round ?? 0) : this.rounds.length,
       category:    this.round.wordEntry.category,
       svg:         this.round.wordEntry.svg,
       image:       this.round.wordEntry.image,
@@ -202,9 +219,12 @@ export class Game extends EventEmitter {
     if (!this.stack) return null;
     return {
       ...this.stack,
-      board: this.stack.board.map(row => [...row]),
-      active: this.stack.active ? { ...this.stack.active } : null,
-      activeCells: this.stack.activeCells.map(cell => [cell[0], cell[1]]),
+      boards: this.stack.boards.map(board => ({
+        ...board,
+        board: board.board.map(row => [...row]),
+        active: board.active ? { ...board.active } : null,
+        activeCells: board.activeCells.map(cell => [cell[0], cell[1]]),
+      })),
     };
   }
 
@@ -263,9 +283,12 @@ export class Game extends EventEmitter {
     this.cleared           = s.cleared ?? 0;
     this.stack             = s.stack ? {
       ...s.stack,
-      board: s.stack.board.map(row => [...row]),
-      active: s.stack.active ? { ...s.stack.active } : null,
-      activeCells: (s.stack.activeCells ?? []).map(cell => [cell[0], cell[1]]),
+      boards: (s.stack.boards ?? []).map(board => ({
+        ...board,
+        board: board.board.map(row => [...row]),
+        active: board.active ? { ...board.active } : null,
+        activeCells: (board.activeCells ?? []).map(cell => [cell[0], cell[1]]),
+      })),
     } : undefined;
   }
 
@@ -326,9 +349,10 @@ export class Game extends EventEmitter {
           this.round.solvers = this.round.solvers
             .map(solver => solver.id === previousId ? { ...solver, id } : solver);
         }
-        if (this.stack?.pilotId === previousId) {
-          this.stack.pilotId = id;
-          this.stack.pilotNick = nick;
+        const stackBoard = this.stack?.boards.find(board => board.playerId === previousId);
+        if (stackBoard) {
+          stackBoard.playerId = id;
+          stackBoard.nick = nick;
           this.broadcastStackState();
         }
         this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
@@ -337,8 +361,38 @@ export class Game extends EventEmitter {
     }
     const player: Player = { id, nick, score: 0, token, connected: true, originNode, avatarId: avatarId ?? 0, avatarKey };
     this.players.set(id, player);
+    // Quien entra durante SiluStack también recibe tablero propio. Si la ronda
+    // ya está visible, comienza con la misma pieza temporal que los demás.
+    if (this.mode === 'silustack' && this.stack && this.isGameLive()) {
+      const board = this.createStackBoard(player);
+      if (this.phase === 'playing' || this.phase === 'countdown') this.prepareStackPiece(board);
+      else board.locked = true;
+      this.stack.boards.push(board);
+      this.stack.survivors = this.stack.boards.filter(item => !item.eliminated).length;
+      this.broadcastStackState();
+    }
     this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
     return player;
+  }
+
+  /**
+   * Cambio de nombre en vivo. También replica el snapshot para que un futuro
+   * coordinador conserve la identidad actualizada tras una elección Bully.
+   */
+  setPlayerNick(playerId: string, nick: string): boolean {
+    const player = this.players.get(playerId);
+    const cleanNick = nick.trim().slice(0, 20);
+    if (!player || !cleanNick) return false;
+    if (player.nick === cleanNick) return true;
+    player.nick = cleanNick;
+    const stackBoard = this.stack?.boards.find(board => board.playerId === playerId);
+    if (stackBoard) {
+      stackBoard.nick = cleanNick;
+      this.broadcastStackState();
+    }
+    this.emit('state_changed');
+    this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
+    return true;
   }
 
   /**
@@ -531,7 +585,7 @@ export class Game extends EventEmitter {
     this.nextRound();
   }
 
-  /** Arranca SiluStack con tablero vacío y banco completo mezclado. */
+  /** Arranca SiluStack: cada jugador conectado recibe su propio tablero. */
   private beginSiluStack() {
     this.resetPlayersForNewGame();
     this.rounds = getMixedQueue(STACK_QUEUE_SIZE, this.recentWords);
@@ -541,9 +595,23 @@ export class Game extends EventEmitter {
     this.currentRoundIndex = -1;
     this.sharedClock = 0;
     this.cleared = 0;
+    const boards = [...this.players.values()]
+      .filter(player => player.connected !== false)
+      .map(player => this.createStackBoard(player));
     this.stack = {
       width: STACK_WIDTH,
       height: STACK_HEIGHT,
+      round: 0,
+      survivors: boards.length,
+      boards,
+    };
+    this.nextRound();
+  }
+
+  private createStackBoard(player: Player): StackBoardState {
+    return {
+      playerId: player.id,
+      nick: player.nick,
       board: Array.from({ length: STACK_HEIGHT }, () => Array(STACK_WIDTH).fill(0)),
       active: null,
       activeCells: [],
@@ -553,9 +621,12 @@ export class Game extends EventEmitter {
       combo: 0,
       level: 1,
       lastClear: 0,
+      unlocked: false,
+      locked: false,
+      eliminated: false,
     };
-    this.nextRound();
   }
+
   private gapBetweenRounds(): number {
     if (this.mode === 'silustack') return STACK_GAP_BETWEEN;
     return this.mode === 'relajo' ? RELAJO_GAP_BETWEEN : GAP_BETWEEN;
@@ -602,23 +673,28 @@ export class Game extends EventEmitter {
     return shape.map(([x, y]) => [piece.x + x, piece.y + y]);
   }
 
-  private syncActiveCells(): void {
-    if (!this.stack) return;
-    this.stack.activeCells = this.stack.active ? this.pieceCells(this.stack.active) : [];
+  private stackBoard(playerId: string): StackBoardState | undefined {
+    return this.stack?.boards.find(board => board.playerId === playerId);
   }
 
-  private canPlace(piece: StackPiece): boolean {
+  private syncActiveCells(board: StackBoardState): void {
+    board.activeCells = board.active ? this.pieceCells(board.active) : [];
+  }
+
+  private canPlace(board: StackBoardState, piece: StackPiece): boolean {
     if (!this.stack) return false;
     return this.pieceCells(piece).every(([x, y]) =>
       x >= 0 && x < this.stack!.width &&
       y >= 0 && y < this.stack!.height &&
-      this.stack!.board[y][x] === 0
+      board.board[y][x] === 0
     );
   }
 
-  private spawnStackPiece(): boolean {
-    if (!this.stack) return false;
-    const kind = this.stack.nextKind;
+  private prepareStackPiece(board: StackBoardState): boolean {
+    if (!this.stack || board.eliminated) return false;
+    const player = this.players.get(board.playerId);
+    if (player) board.nick = player.nick;
+    const kind = board.nextKind;
     const active: StackPiece = {
       kind,
       rotation: 0,
@@ -626,16 +702,30 @@ export class Game extends EventEmitter {
       y: 0,
       color: STACK_COLORS[kind],
     };
-    this.stack.nextKind = this.randomStackKind();
-    this.stack.active = active;
-    this.stack.pilotId = undefined;
-    this.stack.pilotNick = undefined;
-    this.stack.lastClear = 0;
-    this.syncActiveCells();
+    board.nextKind = this.randomStackKind();
+    board.active = active;
+    board.unlocked = false;
+    board.locked = false;
+    board.lastClear = 0;
+    this.syncActiveCells(board);
+    if (this.canPlace(board, active)) return true;
+    board.active = null;
+    board.activeCells = [];
+    board.locked = true;
+    board.eliminated = true;
+    board.eliminatedAt = this.stack.round;
+    return false;
+  }
 
-    if (!this.canPlace(active)) {
-      this.stack.active = null;
-      this.stack.activeCells = [];
+  private spawnStackPieces(): boolean {
+    if (!this.stack) return false;
+    this.stack.round++;
+    for (const board of this.stack.boards) {
+      if (!board.eliminated) this.prepareStackPiece(board);
+    }
+    this.stack.survivors = this.stack.boards.filter(board => !board.eliminated).length;
+    const multiplayerWinner = this.stack.boards.length > 1 && this.stack.survivors <= 1;
+    if (this.stack.survivors === 0 || multiplayerWinner) {
       this.broadcastStackState();
       this.endGame();
       return false;
@@ -643,37 +733,38 @@ export class Game extends EventEmitter {
     return true;
   }
 
-  private tryStackMove(dx: number, dy: number, rotation?: number): boolean {
-    if (!this.stack?.active) return false;
+  private tryStackMove(board: StackBoardState, dx: number, dy: number, rotation?: number): boolean {
+    if (!board.active || board.eliminated || board.locked) return false;
     const candidate: StackPiece = {
-      ...this.stack.active,
-      x: this.stack.active.x + dx,
-      y: this.stack.active.y + dy,
-      rotation: rotation ?? this.stack.active.rotation,
+      ...board.active,
+      x: board.active.x + dx,
+      y: board.active.y + dy,
+      rotation: rotation ?? board.active.rotation,
     };
-    if (!this.canPlace(candidate)) return false;
-    this.stack.active = candidate;
-    this.syncActiveCells();
+    if (!this.canPlace(board, candidate)) return false;
+    board.active = candidate;
+    this.syncActiveCells(board);
     return true;
   }
 
   stackAction(playerId: string, action: StackAction): boolean {
-    if (this.mode !== 'silustack' || this.phase !== 'playing' || !this.stack?.active) return false;
-    if (this.stack.pilotId !== playerId) return false;
+    if (this.mode !== 'silustack' || this.phase !== 'playing') return false;
+    const board = this.stackBoard(playerId);
+    if (!board?.active || !board.unlocked || board.locked || board.eliminated) return false;
 
     if (action === 'drop') {
-      this.hardDropStackPiece();
+      this.hardDropStackBoard(board, false, true);
       return true;
     }
 
     let moved = false;
-    if (action === 'left') moved = this.tryStackMove(-1, 0);
-    if (action === 'right') moved = this.tryStackMove(1, 0);
-    if (action === 'down') moved = this.tryStackMove(0, 1);
+    if (action === 'left') moved = this.tryStackMove(board, -1, 0);
+    if (action === 'right') moved = this.tryStackMove(board, 1, 0);
+    if (action === 'down') moved = this.tryStackMove(board, 0, 1);
     if (action === 'rotate') {
-      const nextRotation = (this.stack.active.rotation + 1) % 4;
+      const nextRotation = (board.active.rotation + 1) % 4;
       for (const kick of [0, -1, 1, -2, 2]) {
-        if (this.tryStackMove(kick, 0, nextRotation)) {
+        if (this.tryStackMove(board, kick, 0, nextRotation)) {
           moved = true;
           break;
         }
@@ -683,44 +774,50 @@ export class Game extends EventEmitter {
     return moved;
   }
 
-  /** La pantalla maestra puede actuar como cabina, pero nunca saltarse al piloto. */
-
-  private hardDropStackPiece(): void {
-    if (!this.stack?.active) return;
-    while (this.tryStackMove(0, 1)) {
-      // La caída es autoritativa y se difunde una sola vez al bloquear la pieza.
+  private hardDropStackBoard(board: StackBoardState, penalized: boolean, finishRound: boolean): void {
+    if (!board.active) return;
+    while (this.tryStackMove(board, 0, 1)) {
+      // La caída se calcula de forma autoritativa y se difunde al fijar.
     }
-    this.lockStackPiece();
+    this.lockStackPiece(board, penalized, finishRound);
   }
 
-  private lockStackPiece(): void {
-    if (!this.stack?.active || !this.round) return;
-    const value = this.stack.pilotId ? this.stack.active.color : 8;
-    for (const [x, y] of this.pieceCells(this.stack.active)) {
-      this.stack.board[y][x] = value;
+  private lockStackPiece(board: StackBoardState, penalized: boolean, finishRound: boolean): void {
+    if (!this.stack || !board.active || !this.round) return;
+    const value = penalized ? 8 : board.active.color;
+    for (const [x, y] of this.pieceCells(board.active)) {
+      board.board[y][x] = value;
     }
 
-    const remaining = this.stack.board.filter(row => row.some(cell => cell === 0));
+    const remaining = board.board.filter(row => row.some(cell => cell === 0));
     const clearedNow = this.stack.height - remaining.length;
     const emptyRows = Array.from({ length: clearedNow }, () => Array(this.stack!.width).fill(0));
-    this.stack.board = [...emptyRows, ...remaining];
-    this.stack.pieces++;
-    this.stack.lines += clearedNow;
-    this.stack.combo = clearedNow > 0 ? this.stack.combo + 1 : 0;
-    this.stack.level = 1 + Math.floor(this.stack.pieces / STACK_PIECES_PER_LEVEL);
-    this.stack.lastClear = clearedNow;
+    board.board = [...emptyRows, ...remaining];
+    board.pieces++;
+    board.lines += clearedNow;
+    board.combo = clearedNow > 0 ? board.combo + 1 : 0;
+    board.level = 1 + Math.floor(board.pieces / STACK_PIECES_PER_LEVEL);
+    board.lastClear = clearedNow;
 
-    if (clearedNow > 0 && this.stack.pilotId) {
-      const pilot = this.players.get(this.stack.pilotId);
-      if (pilot) pilot.score += clearedNow * STACK_LINE_BONUS * this.stack.combo;
+    if (clearedNow > 0 && board.unlocked) {
+      const player = this.players.get(board.playerId);
+      if (player) player.score += clearedNow * STACK_LINE_BONUS * board.combo;
     }
 
-    this.stack.active = null;
-    this.stack.activeCells = [];
-    this.stack.pilotId = undefined;
-    this.stack.pilotNick = undefined;
-    this.broadcastStackState();
-    this.endRound();
+    board.active = null;
+    board.activeCells = [];
+    board.unlocked = false;
+    board.locked = true;
+    if (finishRound) {
+      this.broadcastStackState();
+      this.finishStackRoundIfReady();
+    }
+  }
+
+  private finishStackRoundIfReady(): void {
+    if (!this.stack || this.phase !== 'playing') return;
+    const pending = this.stack.boards.some(board => !board.eliminated && !board.locked);
+    if (!pending) this.endRound();
   }
   /** Suelta el tablero de SiluStack: una partida de otro modo no debe heredarlo. */
   private clearStackIfNotSiluStack() {
@@ -786,12 +883,12 @@ export class Game extends EventEmitter {
     this.phase = 'countdown';
 
     // SiluStack: la pieza se genera ANTES del ROUND_PREVIEW. Si el tablero ya
-    // está lleno, spawnStackPiece() termina la partida y aquí se corta: así
+    // está lleno, spawnStackPieces() termina la partida y aquí se corta: así
     // nunca se emite el preview que abre el overlay de cuenta regresiva. Al
     // revés (que era como estaba) el overlay quedaba tapando el podio final,
     // porque solo ROUND_START lo cierra y ese ya no llega.
     if (this.mode === 'silustack') {
-      if (!this.spawnStackPiece()) return;
+      if (!this.spawnStackPieces()) return;
     }
 
     // Se conoce la ronda (categoría/silueta/palabra) pero el timer real
@@ -810,7 +907,7 @@ export class Game extends EventEmitter {
     if (this.mode === 'silustack') this.broadcastStackState();
 
     if ((this.mode === 'relajo' && this.cleared + this.currentRoundIndex > 0)
-        || (this.mode === 'silustack' && (this.stack?.pieces ?? 0) > 0)) {
+        || (this.mode === 'silustack' && (this.stack?.round ?? 0) > 1)) {
       this.startRoundTimer();
     } else {
       this.runCountdown(COUNTDOWN_FROM);
@@ -877,32 +974,34 @@ export class Game extends EventEmitter {
     });
 
     if (this.mode === 'silustack') {
-      // El fin de ronda se evalúa ANTES de exigir pieza activa. Si no, un tick
-      // sin pieza (p.ej. tras un failover de Bully, donde el nuevo coordinador
-      // reanuda desde un snapshot tomado con active=null) devolvía para siempre
-      // y la partida quedaba congelada: timeLeft bajando a negativo, sin cerrar
-      // ronda ni generar pieza nueva.
-      if (!this.stack?.active) {
-        // Sin pieza activa no hay nada que hacer caer, pero la ronda SÍ tiene
-        // que poder cerrarse: antes se retornaba sin mirar el tiempo y la
-        // partida quedaba congelada para siempre (timeLeft a negativo, sin
-        // cerrar ronda ni generar pieza). Es alcanzable tras un failover de
-        // Bully, si el snapshot se tomó con active=null.
-        if (this.round.timeLeft <= 0) this.endRound();
-        return;
-      }
-      // Con pieza activa el fin de tiempo la hace caer de golpe, no cierra la
-      // ronda a secas: si no, la pieza nunca se fija en el tablero.
+      if (!this.stack) { this.endRound(); return; }
+      const activeBoards = this.stack.boards.filter(board => !board.eliminated && !board.locked && board.active);
+
+      // Al vencer el tiempo, cada tablero pendiente fija su pieza. Si el jugador
+      // nunca acertó, queda roja para que la penalización sea visible.
       if (this.round.timeLeft <= 0) {
-        this.hardDropStackPiece();
+        for (const board of activeBoards) {
+          this.hardDropStackBoard(board, !board.unlocked, false);
+        }
+        this.broadcastStackState();
+        this.endRound();
         return;
       }
+
       const elapsed = this.round.totalTime - this.round.timeLeft;
-      const cadence = Math.max(1, 3 - Math.floor((this.stack.level - 1) / 3));
-      if (elapsed > 0 && elapsed % cadence === 0) {
-        if (this.tryStackMove(0, 1)) this.broadcastStackState();
-        else this.lockStackPiece();
+      let changed = false;
+      for (const board of activeBoards) {
+        const cadence = Math.max(1, 3 - Math.floor((board.level - 1) / 3));
+        if (elapsed > 0 && elapsed % cadence === 0) {
+          if (this.tryStackMove(board, 0, 1)) changed = true;
+          else {
+            this.lockStackPiece(board, !board.unlocked, false);
+            changed = true;
+          }
+        }
       }
+      if (changed) this.broadcastStackState();
+      this.finishStackRoundIfReady();
       return;
     }
 
@@ -950,6 +1049,7 @@ export class Game extends EventEmitter {
     return this.scoreboardLock.runExclusive(id, () => {
       // ── Sección crítica: acceso exclusivo al marcador ──
       if (!this.round || this.phase !== 'playing') return 'not_playing';
+      if (this.mode === 'silustack' && this.stackBoard(id)?.eliminated) return 'not_playing';
       if (this.round.solvers.find(s => s.id === id)) return 'already_solved';
 
       // Timestamp oficial del evento "acierto" en este nodo (Eje 2)
@@ -982,11 +1082,14 @@ export class Game extends EventEmitter {
           this.broadcastSharedClock();
         }
 
-        // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
-        if (this.mode === 'silustack' && position === 1 && this.stack?.active) {
-          this.stack.pilotId = id;
-          this.stack.pilotNick = player.nick;
-          this.broadcastStackState();
+        // En SiluStack cada acierto desbloquea únicamente el tablero de quien
+        // respondió. El orden determina cuánto tiempo real conserva para colocar.
+        if (this.mode === 'silustack') {
+          const board = this.stackBoard(id);
+          if (board?.active && !board.locked && !board.eliminated) {
+            board.unlocked = true;
+            this.broadcastStackState();
+          }
         }
         this.broadcast({
           type: 'CORRECT_ANSWER',
@@ -1078,8 +1181,7 @@ export class Game extends EventEmitter {
     // v2: emitir el resultado final para que el coordinador lo persista (Paso 3).
     // Es un evento interno, NO un broadcast de red: server.ts decide si guardar.
     const medallas: Array<'oro' | 'plata' | 'bronce'> = ['oro', 'plata', 'bronce'];
-    const standings = [...this.players.values()]
-      .sort((a, b) => b.score - a.score)
+    const standings = this.rankedPlayers()
       .map((p, i) => ({
         token:    p.token,
         nick:     p.nick,
@@ -1089,7 +1191,9 @@ export class Game extends EventEmitter {
       }));
     const result: GameOverResult = {
       gameId: this.currentGameId ?? randomUUID(),
-      totalRounds: this.mode === 'silustack' ? (this.stack?.pieces ?? 0) : this.rounds.length,
+      totalRounds: this.mode === 'silustack'
+        ? Math.max(0, ...(this.stack?.boards.map(board => board.pieces) ?? [0]))
+        : this.rounds.length,
       standings,
     };
     // Se asigna ANTES del broadcast final: ese broadcast dispara N_REPLICATE,

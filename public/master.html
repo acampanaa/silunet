@@ -548,44 +548,59 @@
     }
 
     /* ── Modo Relajo: reloj comunitario ── */
-    /* SiluStack: tres focos claros — silueta, tablero compartido y ranking. */
+    /* SiluStack competitivo: silueta común, tableros individuales y ranking. */
     #main-stack {
-      display: none;
-      grid-template-columns: minmax(210px, .68fr) minmax(470px, 1.42fr) minmax(210px, .62fr);
-      gap: clamp(16px, 2.4vw, 36px); align-items: stretch;
-      padding: 14px clamp(20px, 3vw, 48px); overflow: hidden;
+      display:none; grid-template-columns:minmax(190px,.55fr) minmax(0,1.8fr) minmax(190px,.52fr);
+      gap:clamp(14px,2vw,30px); align-items:stretch;
+      padding:14px clamp(18px,2.5vw,40px); overflow:hidden;
     }
     .stack-brief { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
-    .stack-board-panel {
-      min-width:0; position:relative; display:grid; grid-template-columns:minmax(0,auto) 104px;
-      grid-template-areas:'head stats' 'board stats';
-      grid-template-rows:auto auto; align-content:center; justify-content:center;
-      gap:9px 12px;
-    }
-    .stack-kicker { font-family: var(--font-mono); color: var(--secondary); text-transform: uppercase;
-      letter-spacing: .14em; font-size: .72rem; font-weight: 700; }
-    .stack-title { font-size: clamp(1.7rem, 3vw, 3rem); line-height: 1; font-weight: 900;
-      background: linear-gradient(90deg, var(--primary), var(--secondary));
-      -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .stack-silhouette { width: min(200px, 15vw); height: min(200px, 15vw); }
-    .stack-word { font-size: clamp(1.25rem, 2vw, 2rem); letter-spacing: 7px; }
+    .stack-kicker { font-family:var(--font-mono); color:var(--secondary); text-transform:uppercase;
+      letter-spacing:.14em; font-size:.72rem; font-weight:700; text-align:center; }
+    .stack-title { font-size:clamp(1.7rem,3vw,3rem); line-height:1; font-weight:900;
+      background:linear-gradient(90deg,var(--primary),var(--secondary));
+      -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .stack-silhouette { width:min(190px,14vw); height:min(190px,14vw); }
+    .stack-word { font-size:clamp(1.15rem,1.8vw,1.85rem); letter-spacing:6px; }
     .stack-pilot {
-      min-height: 52px; width: 100%; padding: 10px 14px; border-radius: 14px;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.28);
-      color: var(--text-dim); text-align: center;
+      min-height:58px; width:100%; padding:10px 14px; border-radius:14px;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:rgba(34,211,238,.08); border:1px solid rgba(34,211,238,.28);
+      color:var(--text-dim); text-align:center; line-height:1.35;
     }
-    .stack-pilot strong { color: var(--tertiary); font-size: 1.05rem; }
-    .stack-board-head { grid-area:head; width:100%; display:flex; justify-content:space-between;
-      font-family:var(--font-mono); font-size:.78rem; color:var(--text-dim); }
-    .stack-grid {
-      grid-area:board; width:min(38vw,42dvh,440px); aspect-ratio:10 / 16; padding:clamp(6px,.7vw,9px);
-      display:grid; grid-template-columns:repeat(10,1fr); grid-template-rows:repeat(16,1fr);
-      gap:clamp(2px,.28vw,4px); border:1px solid rgba(34,211,238,.48); border-radius:18px;
+    .stack-pilot strong { color:var(--tertiary); font-size:1.05rem; }
+    .stack-board-panel { min-width:0; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
+    .stack-board-head { width:100%; display:flex; justify-content:space-between; align-items:center;
+      font-family:var(--font-mono); font-size:.76rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
+    .stack-board-head strong { color:var(--tertiary); }
+    .stack-arena {
+      flex:1; min-height:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(138px,1fr));
+      align-content:start; gap:10px; padding:2px 5px 8px 2px; overflow:auto;
+      overscroll-behavior:contain; scrollbar-gutter:stable;
+    }
+    .stack-player-card {
+      min-width:0; max-width:230px; width:100%; justify-self:center; padding:9px;
+      border:1px solid rgba(34,211,238,.25); border-radius:14px;
+      background:linear-gradient(160deg,rgba(34,211,238,.055),transparent 42%),rgba(7,10,23,.88);
+      box-shadow:0 14px 28px rgba(0,0,0,.28);
+      transition:border-color 160ms ease-out,box-shadow 160ms ease-out,opacity 160ms ease-out;
+    }
+    .stack-player-card.ready { border-color:rgba(163,230,53,.58); box-shadow:0 0 24px rgba(163,230,53,.1); }
+    .stack-player-card.danger { border-color:rgba(239,68,68,.72); box-shadow:0 0 28px rgba(239,68,68,.17); }
+    .stack-player-card.eliminated { opacity:.54; border-color:rgba(239,68,68,.35); filter:saturate(.5); }
+    .stack-player-head { display:flex; align-items:center; justify-content:space-between; gap:7px; margin-bottom:7px; }
+    .stack-player-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-weight:800; font-size:.78rem; }
+    .stack-player-state { flex:none; color:var(--text-faint); font:700 .52rem/1 var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+    .stack-player-card.ready .stack-player-state { color:var(--tertiary); }
+    .stack-player-card.danger .stack-player-state,.stack-player-card.eliminated .stack-player-state { color:#fca5a5; }
+    .stack-player-grid {
+      width:100%; aspect-ratio:10 / 16; padding:4px; display:grid;
+      grid-template-columns:repeat(10,1fr); grid-template-rows:repeat(16,1fr); gap:2px;
+      border:1px solid rgba(34,211,238,.42); border-radius:9px;
       background:linear-gradient(180deg,rgba(10,15,35,.96),rgba(3,5,14,.98));
-      box-shadow:0 0 54px rgba(34,211,238,.16),0 24px 50px rgba(0,0,0,.4),inset 0 0 28px rgba(0,0,0,.7);
+      box-shadow:inset 0 0 20px rgba(0,0,0,.72);
     }
-    .stack-cell { border-radius:clamp(2px,.25vw,4px); background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.035); }
+    .stack-cell { border-radius:2px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.035); }
     .stack-cell.c1 { --cell:#22d3ee; } .stack-cell.c2 { --cell:#fbbf24; }
     .stack-cell.c3 { --cell:#a855f7; } .stack-cell.c4 { --cell:#fb923c; }
     .stack-cell.c5 { --cell:#3b82f6; } .stack-cell.c6 { --cell:#a3e635; }
@@ -593,44 +608,25 @@
     .stack-cell[class*=' c'] {
       background:linear-gradient(145deg,color-mix(in srgb,var(--cell) 92%,white),color-mix(in srgb,var(--cell) 72%,#08101f));
       border-color:color-mix(in srgb,var(--cell) 60%,white);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 0 9px color-mix(in srgb,var(--cell) 36%,transparent);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 0 6px color-mix(in srgb,var(--cell) 30%,transparent);
     }
-    .stack-cell.c8 { --cell:#ef4444; background:repeating-linear-gradient(135deg,#ef4444 0 5px,#3f1822 5px 10px); }
-    .stack-cell.active { outline:2px solid rgba(255,255,255,.9); outline-offset:-2px; filter:brightness(1.18); }
-    .stack-grid:focus-visible { outline:2px solid var(--tertiary); outline-offset:5px; }
-    .stack-stats { grid-area:stats; width:104px; display:grid; grid-template-columns:1fr; gap:8px; }
-    .stack-stat { min-height:0; padding:8px 5px; border-radius:10px; text-align:center; background:var(--surface-glass);
-      border:1px solid var(--border-soft); font-family:var(--font-mono); display:flex; flex-direction:column; justify-content:center; }
-    .stack-stat b { display:block; color:var(--secondary); font-size:clamp(1rem,1.5vw,1.35rem); }
-    .stack-stat span { color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em; font-size:.55rem; }
-    .stack-clear { grid-area:board; align-self:end; justify-self:stretch; z-index:2; min-height:0; margin:0 10px 12px;
-      color:#07140b; background:transparent; border-radius:8px; font-weight:850; text-align:center; pointer-events:none; }
-    .stack-clear:not(:empty) { padding:7px 10px; background:rgba(163,230,53,.92); box-shadow:0 0 20px rgba(163,230,53,.25); }
-    .stack-keyboard {
-      width:100%; min-height:39px; padding:7px 10px; display:flex; align-items:center; justify-content:center; gap:7px;
-      border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(5,7,17,.72);
-      color:var(--text-faint); font:650 .62rem/1 var(--font-mono); text-transform:uppercase; letter-spacing:.05em;
-      transition:border-color 160ms ease-out,color 160ms ease-out,box-shadow 160ms ease-out;
-    }
-    .stack-keyboard.ready { color:var(--text-dim); border-color:rgba(163,230,53,.4); box-shadow:0 0 20px rgba(163,230,53,.08); }
-    .stack-keyboard kbd { min-width:25px; height:25px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center;
-      border:1px solid rgba(34,211,238,.35); border-bottom-width:3px; border-radius:6px; background:#12172a; color:var(--secondary);
-      font:800 .68rem/1 var(--font-mono); transition:transform 90ms ease-out,background-color 90ms ease-out; }
-    .stack-keyboard kbd.wide { min-width:48px; }
-    .stack-keyboard kbd.pressed { transform:translateY(2px); background:rgba(163,230,53,.2); color:var(--tertiary); }
+    .stack-cell.c8 { --cell:#ef4444; background:repeating-linear-gradient(135deg,#ef4444 0 3px,#3f1822 3px 6px); }
+    .stack-cell.active { outline:1px solid rgba(255,255,255,.92); outline-offset:-1px; filter:brightness(1.18); }
+    .stack-player-foot { display:flex; justify-content:space-between; gap:6px; margin-top:7px;
+      color:var(--text-faint); font:650 .55rem/1 var(--font-mono); text-transform:uppercase; }
+    .stack-player-foot strong { color:var(--secondary); }
 
-    @media (max-width: 980px) {
-      #main-stack { grid-template-columns:minmax(200px,.7fr) minmax(430px,1.3fr); }
+    @media (max-width:980px) {
+      #main-stack { grid-template-columns:minmax(175px,.58fr) minmax(0,1.42fr); }
       #main-stack .rank-panel { display:none; }
+      .stack-arena { grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); }
     }
-    @media (max-width: 760px) {
-      #main-stack { grid-template-columns:1fr; padding:14px; overflow:auto; }
+    @media (max-width:760px) {
+      #main-stack { grid-template-columns:1fr; padding:12px; overflow:auto; }
       #main-stack .stack-brief { display:none; }
-      .stack-board-panel { grid-template-columns:minmax(0,1fr); grid-template-areas:'head' 'board' 'stats'; justify-items:center; }
-      .stack-board-head, .stack-grid, .stack-stats { width:min(76vw,360px); }
-      .stack-grid { max-width:360px; }
-      .stack-stats { grid-template-columns:repeat(4,1fr); }
-      .stack-keyboard { display:none; }
+      .stack-board-panel { overflow:visible; }
+      .stack-arena { overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .stack-player-card { max-width:210px; }
     }
     .relajo-bar {
       display: none; align-items: center; justify-content: center; gap: 28px;
@@ -661,12 +657,17 @@
     .phase-badge.gameEnd { background: rgba(251,191,36,0.15); color: var(--gold); }
 
     /* ── Waiting overlay ── */
+    #main-waiting { overflow: hidden; align-items: stretch !important; }
     .waiting-center { display: flex; flex-direction: column; align-items: center; justify-content: center;
-      flex: 1; gap: 16px; }
+      flex: 1; width: min(100%, 760px); height: 100%; min-height: 0;
+      gap: clamp(8px, 1.35dvh, 16px); overflow: hidden; }
     .big-logo {
       display: block;
-      width: min(720px, 72vw);
+      width: min(620px, 68vw);
+      max-height: clamp(86px, 16dvh, 152px);
       height: auto;
+      object-fit: contain;
+      flex-shrink: 1;
       filter: drop-shadow(0 0 34px rgba(240, 67, 155, 0.3));
     }
     .qr-block {
@@ -692,12 +693,24 @@
       background: var(--surface-glass); backdrop-filter: blur(14px);
       border: 1px solid rgba(34, 211, 238, 0.18); border-radius: 20px;
       padding: 18px 24px; width: 640px;
+      flex: 0 1 220px; max-height: clamp(128px, 24dvh, 220px);
+      min-height: 0; overflow: hidden;
     }
-    .hof-col { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .hof-col { flex: 1; display: flex; flex-direction: column; gap: 8px;
+      min-width: 0; min-height: 0; overflow: hidden; }
     .hof-title { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono);
-      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); }
+      flex-shrink: 0; font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-faint); }
     .hof-title .ico { width: 1rem; height: 1rem; color: var(--secondary); }
-    .hof-list { display: flex; flex-direction: column; gap: 6px; }
+    .hof-list {
+      display: flex; flex: 1; flex-direction: column; gap: 6px;
+      min-height: 0; overflow-y: auto; overflow-x: hidden;
+      overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 5px;
+      scrollbar-width: thin; scrollbar-color: rgba(34, 211, 238, 0.52) transparent;
+    }
+    .hof-list::-webkit-scrollbar { width: 6px; }
+    .hof-list::-webkit-scrollbar-track { background: transparent; }
+    .hof-list::-webkit-scrollbar-thumb { background: rgba(34, 211, 238, 0.45); border-radius: 999px; }
     .hof-row {
       display: flex; align-items: center; gap: 8px;
       background: var(--bg); border-radius: 10px; padding: 8px 12px; font-size: 0.85rem;
@@ -738,7 +751,7 @@
       .mode-picker, .mode-picker-trigger { width:100%; }
       .mode-picker-trigger { min-width:0; }
       .mode-deck { right:-1px; width:calc(100vw - 24px); }
-      .hof-block { width:min(100%,640px); flex-direction:column; }
+      .hof-block { width:min(100%,640px); flex-direction:column; flex-basis:250px; max-height:min(32dvh,250px); }
       .qr-block { max-width:100%; }
       .qr-url { overflow-wrap:anywhere; }
     }
@@ -748,9 +761,14 @@
       main { padding-top:12px; padding-bottom:12px; }
       #main-stack { overflow:auto; }
       footer { padding-top:9px; padding-bottom:9px; }
-      .waiting-center { gap:10px; }
-      .big-logo { max-height:18dvh; object-fit:contain; }
-      .qr-block { padding:12px 18px; }
+      #main-waiting { padding-top:10px; padding-bottom:10px; }
+      .waiting-center { gap:7px; }
+      .big-logo { width:min(520px,64vw); max-height:11dvh; }
+      .qr-block { padding:8px 14px; gap:14px; }
+      #qr-canvas { padding:6px; }
+      #qr-canvas > * { width:104px !important; height:104px !important; }
+      .hof-block { flex-basis:160px; max-height:22dvh; padding:12px 16px; }
+      .hof-row { padding:6px 9px; }
       .mode-deck { padding:10px; gap:8px; }
       .mode-deck-header { min-height:32px; }
       .mode-card-surface { min-height:210px; padding:14px; }
@@ -897,37 +915,22 @@
 
 <main id="main-stack">
   <section class="stack-brief">
-    <p class="stack-kicker" id="ss-round">Pieza 1 · Nivel 1</p>
+    <p class="stack-kicker" id="ss-round">Pieza 1 · 0 activos</p>
     <h1 class="stack-title">SiluStack</h1>
     <div class="cat-badge" id="ss-cat">Categoría</div>
     <div class="silhouette-box stack-silhouette" id="ss-svg"></div>
     <div class="hidden-word stack-word" id="ss-word"></div>
     <div class="stack-pilot" id="ss-pilot" role="status" aria-live="polite">
-      <span>Adivina primero para pilotar</span>
-    </div>
-    <div class="stack-keyboard" id="ss-keyboard" aria-disabled="true">
-      <span>Control PC</span>
-      <kbd data-stack-key="KeyA">A</kbd><span>izq.</span>
-      <kbd data-stack-key="KeyW">W</kbd><span>rotar</span>
-      <kbd data-stack-key="KeyS">S</kbd><span>bajar</span>
-      <kbd data-stack-key="KeyD">D</kbd><span>der.</span>
-      <kbd class="wide" data-stack-key="Enter">Enter</kbd><span>fijar</span>
+      <span>Cada jugador protege su propio tablero</span>
     </div>
   </section>
 
-  <section class="stack-board-panel">
+  <section class="stack-board-panel" aria-label="Tableros individuales de SiluStack">
     <div class="stack-board-head">
-      <span>Tablero compartido</span>
-      <span id="ss-next">Siguiente: —</span>
+      <span>Tableros individuales</span>
+      <strong id="ss-survivors">0 / 0 activos</strong>
     </div>
-    <div class="stack-grid" id="ss-grid" role="img" tabindex="0" aria-label="Tablero de SiluStack"></div>
-    <div class="stack-stats">
-      <div class="stack-stat"><b id="ss-pieces">0</b><span>Piezas</span></div>
-      <div class="stack-stat"><b id="ss-lines">0</b><span>Líneas</span></div>
-      <div class="stack-stat"><b id="ss-combo">0</b><span>Combo</span></div>
-      <div class="stack-stat"><b id="ss-level">1</b><span>Nivel</span></div>
-    </div>
-    <p class="stack-clear" id="ss-clear"></p>
+    <div class="stack-arena" id="ss-arena"></div>
   </section>
 
   <aside class="rank-panel">
@@ -1009,7 +1012,7 @@
           </div>
           <div class="mode-icon"><span data-silunet-icon="gamepad"></span></div>
           <h2 class="mode-name">SiluStack</h2>
-          <p class="mode-desc">Adivina para pilotar. Encaja cada pieza, completa líneas y evita que el tablero colapse.</p>
+          <p class="mode-desc">Cada jugador protege su tablero. Responde rápido, coloca tu pieza y sobrevive al desborde.</p>
           <div class="mode-card-bottom">
             <button class="btn-start" id="btn-stack" type="button" onclick="startGame('silustack')">Construir y sobrevivir</button>
           </div>
@@ -1306,28 +1309,6 @@
   }
   updateModeDeckViewport();
 
-  const stackKeyboardActions = { KeyA: 'left', KeyD: 'right', KeyW: 'rotate', KeyS: 'down', Enter: 'drop' };
-  let lastStackKeyAt = 0;
-  document.addEventListener('keydown', function(event) {
-    const action = stackKeyboardActions[event.code];
-    if (!action || currentMode !== 'silustack' || !currentStackState?.active || !currentStackState.pilotId) return;
-    if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select, button, [contenteditable="true"]')) return;
-    if (event.repeat && (action === 'rotate' || action === 'drop')) return;
-    const now = performance.now();
-    if (event.repeat && now - lastStackKeyAt < 55) return;
-    lastStackKeyAt = now;
-    event.preventDefault();
-    // /master NO pilota (CLAUDE.md: es solo lectura). Las teclas siguen
-    // iluminando el diagrama para que el público vea qué controla el piloto
-    // desde su celular, pero no se envía ninguna acción al servidor.
-    
-    const key = document.querySelector('[data-stack-key="' + event.code + '"]');
-    if (key) {
-      key.classList.add('pressed');
-      window.setTimeout(function() { key.classList.remove('pressed'); }, 90);
-    }
-  });
-
   function handlePlayerCount(msg) {
     document.getElementById('m-count').textContent = msg.count + ' jugador' + (msg.count === 1 ? '' : 'es');
     document.getElementById('f-count').textContent = msg.count;
@@ -1559,8 +1540,57 @@
   function updateStackKicker() {
     if (!currentStackState) return;
     document.getElementById('ss-round').textContent =
-      'Pieza ' + (currentStackState.pieces + 1) + ' · Nivel ' + currentStackState.level +
-      ' · ' + Math.max(0, currentStackTime) + 's';
+      'Pieza ' + currentStackState.round + ' · ' + currentStackState.survivors + '/' + currentStackState.boards.length +
+      ' activos · ' + Math.max(0, currentStackTime) + 's';
+  }
+
+  function renderStackPlayerBoard(state, board) {
+    const highestRow = board.board.findIndex(function(row) {
+      return row.some(function(cell) { return cell !== 0; });
+    });
+    const danger = !board.eliminated && highestRow >= 0 && highestRow <= 3;
+    const ready = Boolean(board.active && board.unlocked && !board.locked && !board.eliminated);
+    const card = document.createElement('article');
+    card.className = 'stack-player-card' + (ready ? ' ready' : '') + (danger ? ' danger' : '') + (board.eliminated ? ' eliminated' : '');
+
+    const head = document.createElement('div');
+    head.className = 'stack-player-head';
+    const name = document.createElement('span');
+    name.className = 'stack-player-name';
+    name.textContent = board.nick;
+    const status = document.createElement('span');
+    status.className = 'stack-player-state';
+    status.textContent = board.eliminated ? 'Fuera' : (board.locked ? 'Lista' : (ready ? 'Control' : (danger ? 'Peligro' : 'Responde')));
+    head.append(name, status);
+
+    const grid = document.createElement('div');
+    grid.className = 'stack-player-grid';
+    grid.setAttribute('role', 'img');
+    grid.setAttribute('aria-label', board.nick + ': ' + board.lines + ' líneas, nivel ' + board.level + (board.eliminated ? ', eliminado' : ''));
+    const active = new Map((board.activeCells || []).map(function(cell) {
+      return [cell[0] + ':' + cell[1], board.active ? board.active.color : 0];
+    }));
+    const cells = document.createDocumentFragment();
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        const cell = document.createElement('span');
+        const activeColor = active.get(x + ':' + y);
+        const value = activeColor || board.board[y][x] || 0;
+        cell.className = 'stack-cell' + (value ? ' c' + value : '') + (activeColor ? ' active' : '');
+        cells.appendChild(cell);
+      }
+    }
+    grid.appendChild(cells);
+
+    const foot = document.createElement('div');
+    foot.className = 'stack-player-foot';
+    const lines = document.createElement('span');
+    lines.append('Líneas ', Object.assign(document.createElement('strong'), { textContent: String(board.lines) }));
+    const pieces = document.createElement('span');
+    pieces.append('Piezas ', Object.assign(document.createElement('strong'), { textContent: String(board.pieces) }));
+    foot.append(lines, pieces);
+    card.append(head, grid, foot);
+    return card;
   }
 
   function handleStackState(msg) {
@@ -1573,48 +1603,28 @@
     document.getElementById('main-game').style.display = 'none';
     document.getElementById('main-stack').style.display = 'grid';
 
-    const active = new Map((state.activeCells || []).map(function(cell) {
-      return [cell[0] + ':' + cell[1], state.active ? state.active.color : 0];
-    }));
-    const frag = document.createDocumentFragment();
-    for (let y = 0; y < state.height; y++) {
-      for (let x = 0; x < state.width; x++) {
-        const cell = document.createElement('span');
-        const activeColor = active.get(x + ':' + y);
-        const value = activeColor || state.board[y][x] || 0;
-        cell.className = 'stack-cell' + (value ? ' c' + value : '') + (activeColor ? ' active' : '');
-        frag.appendChild(cell);
-      }
-    }
-    const grid = document.getElementById('ss-grid');
-    grid.replaceChildren(frag);
-    grid.setAttribute('aria-label', 'Tablero SiluStack: ' + state.lines + ' líneas, nivel ' + state.level);
-    const keyboard = document.getElementById('ss-keyboard');
-    const keyboardReady = Boolean(state.active && state.pilotId);
-    keyboard.classList.toggle('ready', keyboardReady);
-    keyboard.setAttribute('aria-disabled', String(!keyboardReady));
-    if (keyboardReady && modePicker.contains(document.activeElement)) grid.focus({ preventScroll: true });
-    document.getElementById('ss-pieces').textContent = state.pieces;
-    document.getElementById('ss-lines').textContent = state.lines;
-    document.getElementById('ss-combo').textContent = state.combo;
-    document.getElementById('ss-level').textContent = state.level;
-    document.getElementById('ss-next').textContent = 'Siguiente: ' + state.nextKind;
-    document.getElementById('ss-clear').textContent = state.lastClear > 0
-      ? state.lastClear + ' línea' + (state.lastClear === 1 ? '' : 's') + ' · combo x' + state.combo
-      : '';
+    const orderedBoards = [...state.boards].sort(function(a, b) {
+      if (a.eliminated !== b.eliminated) return a.eliminated ? 1 : -1;
+      if ((a.eliminatedAt ?? Infinity) !== (b.eliminatedAt ?? Infinity)) return (b.eliminatedAt ?? Infinity) - (a.eliminatedAt ?? Infinity);
+      return b.lines - a.lines;
+    });
+    const arena = document.getElementById('ss-arena');
+    const fragment = document.createDocumentFragment();
+    orderedBoards.forEach(function(board) {
+      fragment.appendChild(renderStackPlayerBoard(state, board));
+    });
+    arena.replaceChildren(fragment);
+    document.getElementById('ss-survivors').textContent = state.survivors + ' / ' + state.boards.length + ' activos';
 
-    const pilot = document.getElementById('ss-pilot');
-    pilot.replaceChildren();
+    const summary = document.getElementById('ss-pilot');
+    summary.replaceChildren();
     const label = document.createElement('span');
-    if (state.pilotNick) {
-      label.textContent = 'Piloto de esta pieza';
-      const name = document.createElement('strong');
-      name.textContent = state.pilotNick;
-      pilot.append(label, name);
-    } else {
-      label.textContent = 'Adivina primero para pilotar';
-      pilot.append(label);
-    }
+    label.textContent = state.boards.length > 1 ? 'Batalla de supervivencia' : 'Reto individual';
+    const detail = document.createElement('strong');
+    detail.textContent = state.boards.length > 1
+      ? state.survivors + ' tableros siguen en juego'
+      : 'Limpia líneas antes de desbordarte';
+    summary.append(label, detail);
     updateStackKicker();
   }
   function startGame(mode) {

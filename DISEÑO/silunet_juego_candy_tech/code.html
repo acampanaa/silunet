@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;family=Inter:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .glass-card {
+            background: rgba(26, 26, 46, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(240, 67, 155, 0.2);
+        }
+        .neon-glow-fuchsia {
+            box-shadow: 0 0 15px rgba(240, 67, 155, 0.4);
+        }
+        .silhouette-pulse {
+            animation: pulse-border 2s infinite ease-in-out;
+        }
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(34, 211, 238, 0.2); }
+            50% { border-color: rgba(163, 230, 53, 0.6); }
+        }
+        .letter-spacing-widest {
+            letter-spacing: 0.5em;
+        }
+        .progress-bar-transition {
+            transition: width 1s linear, background-color 0.5s ease;
+        }
+        .countdown-overlay {
+            background: rgba(15, 15, 26, 0.95);
+        }
+        .logo-gradient {
+            background: linear-gradient(to right, #F0439B, #22D3EE);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "candy-fuchsia": "#F0439B",
+                        "candy-cyan": "#22D3EE",
+                        "candy-lime": "#A3E635",
+                        "tertiary": "#c4c3eb",
+                        "surface-tint": "#c7c5d5",
+                        "surface-bright": "#3a393a",
+                        "on-tertiary": "#2d2d4d",
+                        "outline": "#929096",
+                        "secondary": "#22D3EE",
+                        "secondary-fixed": "#e2e0fc",
+                        "inverse-on-surface": "#313031",
+                        "surface-container-lowest": "#0e0e0f",
+                        "error-container": "#93000a",
+                        "surface-container-low": "#1c1b1c",
+                        "surface-dim": "#141314",
+                        "on-tertiary-container": "#79799e",
+                        "surface-container-high": "#2a2a2b",
+                        "on-tertiary-fixed": "#181837",
+                        "surface-variant": "#353435",
+                        "surface-container": "#201f20",
+                        "on-primary-fixed-variant": "#464552",
+                        "on-error": "#690005",
+                        "on-primary-fixed": "#1b1a26",
+                        "on-primary-container": "#7c7b89",
+                        "on-secondary-container": "#b8b6d0",
+                        "on-secondary-fixed": "#1a1a2e",
+                        "outline-variant": "#47464c",
+                        "background": "#141314",
+                        "on-primary": "#ffffff",
+                        "on-secondary-fixed-variant": "#45455b",
+                        "inverse-surface": "#e5e1e2",
+                        "on-background": "#e5e1e2",
+                        "on-surface-variant": "#c8c5cc",
+                        "error": "#ffb4ab",
+                        "primary-fixed-dim": "#c7c5d5",
+                        "on-secondary": "#141314",
+                        "on-tertiary-fixed-variant": "#444465",
+                        "surface-container-highest": "#353435",
+                        "inverse-primary": "#5e5d6b",
+                        "primary-fixed": "#e3e0f1",
+                        "secondary-container": "#47475d",
+                        "on-error-container": "#ffdad6",
+                        "secondary-fixed-dim": "#c6c4df",
+                        "on-surface": "#e5e1e2",
+                        "primary-container": "#0f0f1a",
+                        "tertiary-container": "#0c0c2b",
+                        "primary": "#F0439B",
+                        "tertiary-fixed": "#e2dfff",
+                        "tertiary-fixed-dim": "#c4c3eb",
+                        "surface": "#141314"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sm": "16px",
+                        "lg": "40px",
+                        "base": "4px",
+                        "xs": "8px",
+                        "container-max": "1280px",
+                        "gutter": "20px",
+                        "md": "24px",
+                        "xl": "64px"
+                    },
+                    "fontFamily": {
+                        "display-lg-mobile": ["Sora"],
+                        "headline-md": ["Sora"],
+                        "label-caps": ["JetBrains Mono"],
+                        "body-base": ["Inter"],
+                        "data-mono": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "display-lg-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "800"}],
+                        "headline-md": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}],
+                        "label-caps": ["12px", {"lineHeight": "1.2", "fontWeight": "700"}],
+                        "body-base": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "data-mono": ["14px", {"lineHeight": "1.4", "letterSpacing": "0.1em", "fontWeight": "500"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="bg-primary-container text-on-surface font-body-base min-h-screen flex flex-col overflow-x-hidden">
+<!-- Header / Top Bar -->
+<header class="relative z-10 flex justify-between items-center p-md">
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-candy-cyan text-2xl">terminal</span>
+<span class="font-headline-md text-headline-md tracking-tight logo-gradient">SILUNET</span>
+</div>
+<!-- Profile Floating Icon -->
+<button class="w-12 h-12 rounded-full border-2 border-candy-fuchsia/30 p-1 bg-surface-container overflow-hidden active:scale-90 transition-transform">
+<img class="w-full h-full object-cover rounded-full" data-alt="A futuristic digital avatar of a pilot wearing a high-tech chrome helmet with violet neon glowing visors. The character is set against a dark navy background with technical UI data readouts floating around. The style is polished 3D rendering with sharp cinematic lighting and a cybernetic aesthetic consistent with a competitive space-themed gaming interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDekJ8tUgOumBa2TUtlJcdHhBYjAHw00XvFJB9UaZfdCO3N1cIXBoV3ZYZTWD9AGCclv_I8nlFN2TOF637BKdrqEIU1d9vtD_fgwmUiRU9o48shknmpPgB0kamy0XMaYqwjKGoUi2cWrTxkmxKtZLTDfl4jGy_JciIq5KlXFh7kcpKMaNuwibdUIk_goH8tlHPJgnHv_EIjfQKXkgnyGRXpJA2kEx3J0koMGfvvv5Lfu-6szRf2N01i5qQaDY1psq0G-qb-KrW-hNjA"/>
+</button>
+</header>
+<!-- Main Game Canvas -->
+<main class="relative z-10 flex-1 flex flex-col items-center px-gutter gap-md mt-xs">
+<!-- Category Pill -->
+<div class="px-sm py-xs bg-surface-container-high rounded-full border border-candy-cyan/30 flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-candy-cyan" style="font-variation-settings: 'FILL' 1;">memory</span>
+<span class="font-label-caps text-label-caps text-candy-cyan uppercase tracking-wider">Categoría: Hardware</span>
+</div>
+<!-- Silhouette Central Card -->
+<div class="w-full max-w-[340px] aspect-square glass-card rounded-xl flex items-center justify-center p-lg relative silhouette-pulse overflow-hidden shadow-xl">
+<!-- Decorative FUI elements -->
+<div class="absolute top-2 left-2 font-data-mono text-[10px] text-candy-lime/60 uppercase">Acknowledge_Signal</div>
+<div class="absolute bottom-2 right-2 font-data-mono text-[10px] text-candy-lime uppercase">Node_442_Active</div>
+<!-- Silhouette Placeholder -->
+<div class="w-full h-full flex items-center justify-center">
+<span class="material-symbols-outlined text-[160px] text-black/90 drop-shadow-[0_0_8px_rgba(240,67,155,0.3)]">router</span>
+</div>
+</div>
+<!-- Word Display -->
+<div class="flex flex-col items-center gap-xs w-full">
+<div class="font-data-mono text-[32px] tracking-[0.6em] text-candy-cyan font-bold ml-4">
+            _ _ _ _ _ _
+        </div>
+<div class="font-label-caps text-label-caps text-on-surface-variant/60 uppercase">Estructura del Nodo</div>
+</div>
+<!-- Time Bar -->
+<div class="w-full bg-surface-container rounded-full h-2 relative overflow-hidden mt-sm">
+<div class="absolute left-0 top-0 h-full bg-candy-cyan progress-bar-transition w-[75%]" id="timer-bar"></div>
+</div>
+<!-- Input Section -->
+<div class="w-full flex flex-col gap-sm mt-md">
+<div class="relative">
+<input class="w-full bg-surface-container-low border-0 border-b-2 border-outline-variant focus:border-candy-fuchsia focus:ring-0 text-on-surface py-md px-xs font-body-base transition-colors duration-300" placeholder="Tu respuesta" type="text"/>
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-on-surface-variant/40">keyboard</span>
+</div>
+<button class="w-full py-md bg-candy-fuchsia text-white font-headline-md rounded-lg active:scale-95 transition-all shadow-lg neon-glow-fuchsia">
+            Enviar
+        </button>
+</div>
+<!-- Mini-ranking -->
+<div class="w-full mt-lg mb-xl">
+<div class="flex items-center justify-between mb-sm border-b border-outline-variant/20 pb-xs">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Líderes de Sesión</span>
+<span class="material-symbols-outlined text-candy-fuchsia text-sm">leaderboard</span>
+</div>
+<div class="space-y-xs">
+<!-- Rank 1 - Top Tier -->
+<div class="flex items-center justify-between glass-card p-sm rounded-lg border-l-4 border-candy-fuchsia">
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-candy-fuchsia font-bold">01</span>
+<div class="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A small circular avatar of a cyberpunk character with glowing neon blue eyes and a sleek black metallic mask. The art style is high-fidelity 2D digital illustration with sharp edges and vibrant accent lighting on the character's futuristic apparel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAuRiD2NZs-Qyjvxg98_ZfRsaCB29lzdSmUfUzX6OeEJwlwtY9C9CmHBJZt26e9tCTPqgabPb-HjewbWCPT0cInTc5wBj4leDXvDFHphiJe-cY1SvKHkHStwnk_XHs_D4EX15GOf7PL8pUR25fhhp13tg5THJZb4yQ4lJhqsQ80_a3ytqX7dKhI07dMRiu3UdxLK6Nf4x9mholOs1V69YaKoI83s6Q5kgaKKw7Lv0FL_A4qGINewxMwsXNijkTHeLVYJdA9zS8rZuOy"/>
+</div>
+<span class="font-body-base font-semibold">NeonViper</span>
+</div>
+<span class="font-data-mono text-candy-fuchsia">2,450 pts</span>
+</div>
+<!-- Rank 2 - Secondary -->
+<div class="flex items-center justify-between glass-card p-sm rounded-lg border-l-4 border-candy-cyan/50">
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-candy-cyan">02</span>
+<div class="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A minimalist digital avatar of a player using a red and chrome visor. High contrast lighting against a deep indigo background. The character wears tactical gear with subtle purple glowing accents along the collar." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAAZ4JCu42sYm0bSR5WtNOI_UTJ11P-HFWBa6Pt8Ky1oW2B1R81GS1PW-Ikv-5ph_AWVGg2sslDbuxPy61Y0Tjy67RxWWuFZVtlTtrX4Scilz8rLBv4C1g_y02hRACmA14Qa8hXlW2dWKorRBLEgnMqbnBfGaHjJdnSJnOzIBb7LOKLeCKcwdY6Of0KwW8lXInbVfXM_w_1tE0xh2qLfIbyBpW7xrFnN5yXOndpvCRiah2cOIG_dpaqit8-Mph3b7RKpRVYwT7JdmR-"/>
+</div>
+<span class="font-body-base">Ghost_Shell</span>
+</div>
+<span class="font-data-mono text-candy-cyan">2,120 pts</span>
+</div>
+<!-- Rank 3 - Secondary -->
+<div class="flex items-center justify-between glass-card p-sm rounded-lg border-l-4 border-candy-cyan/50">
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-candy-cyan">03</span>
+<div class="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A portrait of a tech-heavy character with a digital overlay over one eye, showing green scanning patterns. The character has a futuristic short-cropped hairstyle and is set in a low-light environment with amber accent glows." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCHzg065Xc2qtjVTXptd1pGIKCU3ReZAv1zBb90XZGDD07HSTIDNWYSe5jRPpsPcq0Zht9Wbpv4P0hPc2S6cUyK6rwAEvC7RHVyXjlNEz325WESrcdhSN9cNsApKAh9CEaGTgkHITG9Q-fEt7eqCMh5FeUnN4Iy0hj1lt_jewg-sguJDbNp3jVOpwWnlrfviV2j5Wu-nI0RxOeUx1R86p2cm3sF-7AflFEDA8N46BMpHwDVTJZw63ax7LeZzQ2o9YGBYpixNn2b6l7J"/>
+</div>
+<span class="font-body-base">BinaryStar</span>
+</div>
+<span class="font-data-mono text-candy-cyan">1,980 pts</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Nav Shell -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-sm py-xs lg:hidden bg-surface/80 backdrop-blur-2xl border-t border-outline-variant/20 shadow-[0_-8px_20px_rgba(0,0,0,0.5)] rounded-t-xl">
+<button class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-candy-cyan transition-all">
+<span class="material-symbols-outlined">dynamic_feed</span>
+<span class="font-label-caps text-label-caps">Feed</span>
+</button>
+<button class="flex flex-col items-center justify-center bg-primary-container text-candy-fuchsia rounded-xl p-2 shadow-[0_0_10px_rgba(240,67,155,0.3)]">
+<span class="material-symbols-outlined">videogame_asset</span>
+<span class="font-label-caps text-label-caps">Play</span>
+</button>
+<button class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-candy-cyan transition-all">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span class="font-label-caps text-label-caps">Vault</span>
+</button>
+<button class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:text-candy-cyan transition-all">
+<span class="material-symbols-outlined">monitoring</span>
+<span class="font-label-caps text-label-caps">Stats</span>
+</button>
+</nav>
+<!-- Overlay: Countdown -->
+<div class="fixed inset-0 z-[100] countdown-overlay flex items-center justify-center hidden" id="countdown-overlay">
+<div class="text-center">
+<div class="font-display-lg-mobile text-display-lg-mobile text-candy-fuchsia animate-bounce" id="countdown-text">3</div>
+<div class="font-label-caps text-label-caps text-candy-cyan uppercase tracking-[0.5em] mt-4">Iniciando Enlace...</div>
+</div>
+</div>
+<!-- Notification: Success Toast -->
+<div class="fixed top-8 left-1/2 -translate-x-1/2 z-[110] glass-card px-md py-sm rounded-full border-candy-lime border-2 flex items-center gap-sm shadow-[0_0_30px_rgba(163,230,53,0.4)] opacity-0 translate-y-[-20px] transition-all duration-500" id="success-toast">
+<div class="bg-candy-lime text-surface rounded-full p-1 flex items-center justify-center">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<span class="font-headline-md text-[18px] text-candy-lime">¡Acertaste!</span>
+</div>
+<script>
+    // Micro-interactions and Logic
+    const timerBar = document.getElementById('timer-bar');
+    const countdownOverlay = document.getElementById('countdown-overlay');
+    const countdownText = document.getElementById('countdown-text');
+    const successToast = document.getElementById('success-toast');
+
+    // Simulate Timer Progress
+    let width = 75;
+    const interval = setInterval(() => {
+        width -= 2;
+        if (width < 0) width = 0;
+        timerBar.style.width = width + '%';
+        
+        // Color Shift
+        if (width < 30) {
+            timerBar.classList.remove('bg-candy-cyan');
+            timerBar.classList.add('bg-error');
+        } else {
+            timerBar.classList.add('bg-candy-cyan');
+            timerBar.classList.remove('bg-error');
+        }
+        if (width === 0) clearInterval(interval);
+    }, 1000);
+
+    // Function to trigger Countdown
+    function triggerCountdown() {
+        countdownOverlay.classList.remove('hidden');
+        let count = 3;
+        const countInterval = setInterval(() => {
+            count--;
+            if (count > 0) {
+                countdownText.innerText = count;
+            } else if (count === 0) {
+                countdownText.innerText = "¡YA!";
+                countdownText.classList.add('scale-150', 'text-candy-lime');
+            } else {
+                countdownOverlay.classList.add('opacity-0');
+                setTimeout(() => countdownOverlay.classList.add('hidden'), 500);
+                clearInterval(countInterval);
+            }
+        }, 1000);
+    }
+
+    // Function to trigger Success
+    function showSuccess() {
+        successToast.classList.remove('opacity-0');
+        successToast.classList.add('opacity-100', 'translate-y-0');
+        setTimeout(() => {
+            successToast.classList.add('opacity-0', 'translate-y-[-20px]');
+        }, 3000);
+    }
+
+    // For demonstration purposes, trigger success on "Enviar" click
+    document.querySelector('button.bg-candy-fuchsia').addEventListener('click', (e) => {
+        e.preventDefault();
+        showSuccess();
+    });
+
+    // Trigger countdown on page load
+    window.addEventListener('load', () => {
+        setTimeout(triggerCountdown, 500);
+    });
+</script>
+</body></html>

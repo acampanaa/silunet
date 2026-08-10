@@ -3,15 +3,12 @@ SILUNET - TEMATICAS Y BANCO DE PALABRAS
 PUCE Sede Manabi - Ingenieria de Software
 ==============================================================================
 
-Total: 160 palabras en 8 tematicas.
+Total: 159 palabras en 8 tematicas.
 
 La dificultad se deriva del largo de la palabra (no se anota a mano):
   FACIL       = 5 letras o menos
   INTERMEDIO  = 6 a 8 letras
   DIFICIL     = 9 letras o mas
-
-Los jugadores votan tematica Y dificultad antes de cada partida, asi que
-cada combinacion define el pool de palabras de esa partida.
 
 [*] = silueta ya dibujada    [ ] = usa placeholder, falta ilustrar
 
@@ -20,7 +17,7 @@ RESUMEN POR TEMATICA
 ------------------------------------------------------------------------------
 
   TEMATICA           TOTAL   FACIL   INTERM.   DIFICIL   ILUSTRADAS
-  Computadores        20       6        8         6        11/20
+  Computadores        19       5        8         6        10/19
   Redes               20       6        8         6        10/20
   Dispositivos        20       6        8         6        10/20
   Almacenamiento      20       6        8         6         6/20
@@ -29,18 +26,16 @@ RESUMEN POR TEMATICA
   Transporte          20       6        8         6         0/20
   Instrumentos        20       6        8         6         0/20
 
-
 ==============================================================================
   COMPUTADORES
 ==============================================================================
 
-  FACIL      (<=5 letras)   -   6 palabras
+  FACIL      (<=5 letras)   -   5 palabras
   --------------------------------------------------------------------------
-    [*] CHIP          (4 letras)   pista: Es una pieza diminuta que puede realizar millones de operaciones.
     [*] RATON         (5 letras)   pista: Se desplaza sobre una superficie para controlar el puntero.
     [ ] PLACA         (5 letras)   pista: Sirve como base para conectar los componentes internos.
     [ ] TECLA         (5 letras)   pista: Cada una representa una entrada que se presiona con los dedos.
-    [ ] BOTON         (5 letras)   pista: Activa una acción cuando se presiona.
+    [ ] PILA          (4 letras)   pista: Guarda energía para que un aparato funcione sin enchufe.
     [ ] PIXEL         (5 letras)   pista: Es la unidad de color más pequeña que ves en una pantalla.
 
   INTERMEDIO (6-8 letras)   -   8 palabras

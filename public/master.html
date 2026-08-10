@@ -35,8 +35,14 @@
     }
 
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { width: 100%; height: 100%; background: var(--bg); }
     body {
+      width: 100%;
       min-height: 100vh;
+      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
       background: var(--bg);
       background-image:
         radial-gradient(circle at 8% 6%, rgba(240, 67, 155, 0.13) 0%, transparent 42%),
@@ -50,6 +56,8 @@
       display: flex;
       flex-direction: column;
     }
+
+    header, .engine-strip, .relajo-bar, footer { flex-shrink: 0; }
 
     /* ── Header ── */
     header {
@@ -73,17 +81,17 @@
     .puce-brand {
       display: flex; align-items: center; gap: 10px;
       padding-left: 14px; border-left: 1px solid var(--border-soft);
+      min-width: 0;
     }
-    .puce-mark {
-      width: 34px; height: 34px; border-radius: 7px; flex-shrink: 0;
-      background: linear-gradient(135deg, #1d4ed8, #0a2a6b);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.8rem; font-weight: 900; color: #fff; letter-spacing: -1px;
-      box-shadow: 0 0 0 1px #2a4a8a inset;
+    .puce-logo {
+      display: block;
+      width: 50px;
+      height: auto;
+      flex-shrink: 0;
+      filter: drop-shadow(0 3px 9px rgba(0, 86, 166, 0.2));
     }
     .puce-text { display: flex; flex-direction: column; line-height: 1.15; }
-    .puce-name { font-size: 0.82rem; font-weight: 800; color: #cdd9f5; letter-spacing: 0.01em; }
-    .puce-sub  { font-size: 0.68rem; color: var(--text-faint); letter-spacing: 0.02em; }
+    .puce-sub  { max-width: 92px; font-size: 0.68rem; color: #b9c8e5; letter-spacing: 0.02em; }
     .nodes {
       display: flex; gap: 8px; align-items: center; font-size: 0.8rem; color: var(--text-faint);
     }
@@ -221,6 +229,8 @@
       gap: 24px;
       padding: 24px 28px;
       align-items: start;
+      min-width: 0; min-height: 0;
+      overflow: auto; overscroll-behavior: contain;
     }
 
     /* ── Left: juego ── */
@@ -247,6 +257,21 @@
       50%      { border-color: rgba(163, 230, 53, 0.55); }
     }
     .silhouette-box svg { width: 230px; height: 230px; }
+    /* Silueta en archivo (public/images/): el PNG es negro puro, asi que se
+       usa como MASCARA sobre currentColor. Pintarlo tal cual lo volveria
+       invisible sobre el fondo oscuro; asi hereda el color del tema igual
+       que los SVG con fill="currentColor". */
+    .silhouette-box .silueta-img {
+      width: 76%; height: 76%;
+      background-color: currentColor;
+      -webkit-mask: var(--silueta) center / contain no-repeat;
+      mask: var(--silueta) center / contain no-repeat;
+    }
+    /* El objeto a color, ya revelado: aca si es una imagen de verdad. */
+    .reveal-img {
+      width: 260px; height: 260px; object-fit: contain;
+      border-radius: 14px; display: block; margin: 0 auto;
+    }
     .hidden-word {
       font-size: 2.8rem; font-weight: 700; letter-spacing: 12px;
       color: var(--text); font-family: var(--font-mono);
@@ -299,31 +324,314 @@
       backdrop-filter: blur(16px);
       border-top: 1px solid rgba(240, 67, 155, 0.18);
       gap: 16px;
+      position: relative; z-index: 50; overflow: visible;
     }
     .player-info { font-size: 0.9rem; color: var(--text-dim); }
     .player-info strong { color: var(--text); font-family: var(--font-mono); }
     .ctrl-btns { display: flex; gap: 10px; }
+
+    /* Selector de modos: dock compacto que se abre como una baraja arcade. */
+    .mode-picker {
+      --picker-ease: cubic-bezier(.2, 0, 0, 1);
+      position: relative; z-index: 80;
+      display: flex; justify-content: flex-end;
+      perspective: 1200px;
+    }
+    .mode-picker-trigger {
+      min-width: 218px; min-height: 48px; padding: 8px 10px 8px 15px;
+      display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px;
+      border: 1px solid rgba(34,211,238,.42); border-radius: 11px;
+      background:
+        linear-gradient(105deg, rgba(34,211,238,.15), rgba(240,67,155,.11)),
+        rgba(7,9,21,.96);
+      color: var(--text); cursor: pointer; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.025) inset, 0 12px 32px rgba(0,0,0,.34);
+      transform-origin: bottom right;
+      transition: border-color 140ms ease-out, box-shadow 180ms ease-out, transform 120ms ease-out;
+    }
+    .mode-picker-trigger::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(110deg, transparent 25%, rgba(255,255,255,.13) 47%, transparent 67%);
+      transform: translateX(-125%); transition: transform 420ms var(--picker-ease);
+    }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-picker-trigger::before { transform: translateX(125%); }
+    .mode-picker-trigger:hover { border-color: var(--secondary); box-shadow: 0 0 26px rgba(34,211,238,.2); }
+    .mode-picker-trigger:active { transform: scale(.98); }
+    .mode-picker-trigger:focus-visible {
+      outline: 2px solid var(--secondary); outline-offset: 4px;
+    }
+    .mode-picker-trigger .ico { width: 22px; height: 22px; color: var(--secondary); }
+    .mode-trigger-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; line-height: 1.05; }
+    .mode-trigger-copy strong { font-size: .9rem; text-transform: uppercase; letter-spacing: .08em; }
+    .mode-trigger-copy small { margin-top: 4px; color: var(--text-faint); font: 600 .62rem/1 var(--font-mono); }
+    .mode-trigger-chevron { transition: transform 240ms var(--picker-ease); }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-trigger-chevron { transform: rotate(180deg); }
+    .mode-picker.locked .mode-picker-trigger { border-color: rgba(163,230,53,.35); }
+    .mode-picker.locked .mode-picker-trigger .ico { color: var(--tertiary); }
+
+    .mode-deck {
+      position: absolute; right: 0; bottom: calc(100% + 16px);
+      width: min(900px, calc(100vw - 44px)); padding: 14px;
+      max-height: var(--mode-deck-max-height, calc(100dvh - 150px));
+      overflow-x: hidden; overflow-y: auto;
+      overscroll-behavior: contain; scrollbar-gutter: stable;
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px;
+      border: 1px solid rgba(34,211,238,.2); border-radius: 18px 5px 18px 18px;
+      background:
+        linear-gradient(135deg, rgba(240,67,155,.07), transparent 32%),
+        linear-gradient(315deg, rgba(34,211,238,.09), transparent 38%),
+        rgba(7,8,19,.95);
+      backdrop-filter: blur(24px) saturate(1.2);
+      box-shadow: 0 30px 80px rgba(0,0,0,.58), 0 0 0 1px rgba(255,255,255,.025) inset;
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transform: translate3d(20px,18px,0) rotateX(-7deg) scale(.94);
+      transform-origin: bottom right;
+      transition:
+        opacity 180ms ease-in,
+        visibility 0s linear 260ms,
+        transform 280ms var(--picker-ease);
+    }
+    .mode-deck::after {
+      content: ''; position: absolute; right: 0; bottom: -18px; width: 250px; height: 20px;
+    }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-deck {
+      opacity: 1; visibility: visible; pointer-events: auto;
+      transform: translate3d(0,0,0) rotateX(0) scale(1);
+      transition:
+        opacity 180ms ease-out,
+        visibility 0s linear 0s,
+        transform 360ms var(--picker-ease);
+    }
+    .mode-deck-header {
+      grid-column: 1 / -1; min-height: 38px; padding: 1px 4px 7px;
+      display: flex; align-items: center; justify-content: space-between; gap: 20px;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .mode-deck-title { display:flex; align-items:center; gap:10px; }
+    .mode-deck-title b { font-size:.88rem; text-transform:uppercase; letter-spacing:.13em; }
+    .mode-deck-title span { color:var(--text-faint); font:600 .62rem/1 var(--font-mono); text-transform:uppercase; }
+    .mode-deck-hint { color:var(--text-faint); font:600 .62rem/1 var(--font-mono); letter-spacing:.04em; }
+
+    .mode-card {
+      position: relative; min-width: 0;
+      opacity: 0; transform: translate3d(24px,12px,0) scale(.95);
+      transition: opacity 160ms ease-in, transform 200ms ease-in;
+    }
+    .mode-card:nth-child(2) { transition-delay: 0ms; }
+    .mode-card:nth-child(3) { transition-delay: 20ms; }
+    .mode-card:nth-child(4) { transition-delay: 40ms; }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-card {
+      opacity: 1; transform: translate3d(0,0,0) scale(1);
+      transition: opacity 220ms ease-out, transform 360ms var(--picker-ease);
+    }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(2) { transition-delay: 45ms; }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(3) { transition-delay: 85ms; }
+    .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(4) { transition-delay: 125ms; }
+
+    .mode-card-surface {
+      --mx: 50%; --my: 50%; --rx: 0deg; --ry: 0deg;
+      position: relative; min-height: 246px; height: 100%; padding: 18px;
+      display: flex; flex-direction: column; overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--mode-accent) 42%, transparent);
+      border-radius: 13px 3px 13px 13px;
+      background:
+        linear-gradient(155deg, color-mix(in srgb, var(--mode-accent) 16%, transparent), transparent 42%),
+        rgba(17,18,35,.92);
+      box-shadow: 0 14px 32px rgba(0,0,0,.3), 0 0 0 1px rgba(255,255,255,.025) inset;
+      transform: perspective(850px) rotateX(var(--rx)) rotateY(var(--ry)) translateZ(0);
+      transform-style: preserve-3d; will-change: transform;
+      transition: transform 120ms ease-out, border-color 140ms ease-out, box-shadow 180ms ease-out;
+    }
+    .mode-card-surface::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(circle at var(--mx) var(--my), color-mix(in srgb, var(--mode-accent) 28%, transparent), transparent 42%);
+      transition: opacity 160ms ease-out;
+    }
+    .mode-card-surface::after {
+      content: ''; position:absolute; left:0; top:0; width:72%; height:3px;
+      background: linear-gradient(90deg, var(--mode-accent), transparent);
+      box-shadow: 0 0 18px color-mix(in srgb, var(--mode-accent) 65%, transparent);
+    }
+    .mode-card:hover .mode-card-surface,
+    .mode-card:focus-within .mode-card-surface {
+      border-color: color-mix(in srgb, var(--mode-accent) 76%, transparent);
+      box-shadow: 0 20px 44px rgba(0,0,0,.4), 0 0 24px color-mix(in srgb, var(--mode-accent) 16%, transparent);
+    }
+    .mode-card:hover .mode-card-surface::before,
+    .mode-card:focus-within .mode-card-surface::before { opacity: 1; }
+
+    .mode-classic { --mode-accent: var(--primary); }
+    .mode-relajo { --mode-accent: var(--tertiary); }
+    .mode-stack { --mode-accent: var(--secondary); }
+    .mode-card-top { position:relative; z-index:2; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .mode-number { color:var(--mode-accent); font:800 .68rem/1 var(--font-mono); letter-spacing:.15em; }
+    .mode-tag {
+      padding:5px 8px; border:1px solid color-mix(in srgb, var(--mode-accent) 38%, transparent);
+      border-radius:4px; color:var(--mode-accent); background:color-mix(in srgb, var(--mode-accent) 9%, transparent);
+      font:700 .56rem/1 var(--font-mono); letter-spacing:.1em; text-transform:uppercase;
+    }
+    .mode-icon {
+      position:relative; z-index:2; width:46px; height:46px; margin-top:22px;
+      display:flex; align-items:center; justify-content:center;
+      color:var(--mode-accent); border:1px solid color-mix(in srgb, var(--mode-accent) 42%, transparent);
+      background:color-mix(in srgb, var(--mode-accent) 8%, transparent);
+      clip-path: polygon(0 0, 100% 0, 100% 74%, 74% 100%, 0 100%);
+      transform: translateZ(24px);
+    }
+    .mode-icon .ico { width:25px; height:25px; }
+    .mode-name {
+      position:relative; z-index:2; margin-top:12px; color:#fff;
+      font-size:clamp(1.05rem,1.3vw,1.35rem); font-weight:900; letter-spacing:-.03em;
+      text-transform:uppercase; text-wrap:balance; transform:translateZ(18px);
+    }
+    .mode-desc {
+      position:relative; z-index:2; margin-top:7px; min-height:52px;
+      color:var(--text-dim); font-size:.74rem; line-height:1.45; text-wrap:pretty;
+      transform:translateZ(12px);
+    }
+    .mode-card-bottom {
+      position:relative; z-index:2; margin-top:auto; padding-top:14px;
+      display:flex; align-items:center; gap:9px; transform:translateZ(16px);
+    }
+    .mode-rounds {
+      min-width:82px; height:35px; padding:4px 7px;
+      display:flex; align-items:center; justify-content:space-between; gap:5px;
+      border:1px solid rgba(240,67,155,.34); border-radius:7px;
+      background:rgba(5,6,15,.58); color:var(--text-faint);
+      font:700 .55rem/1 var(--font-mono); text-transform:uppercase;
+    }
     .rounds-input {
-      padding: 8px 12px;
-      background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px;
-      color: var(--text); font-family: var(--font-mono); font-size: 0.9rem;
-      width: 80px; text-align: center; outline: none;
-      transition: border-color 0.2s;
+      width:30px; padding:0; border:0; outline:0; background:transparent;
+      color:#fff; font:800 .8rem/1 var(--font-mono); text-align:center;
+      appearance:textfield;
     }
-    .rounds-input:focus { border-color: var(--secondary); }
+    .rounds-input::-webkit-inner-spin-button,
+    .rounds-input::-webkit-outer-spin-button { appearance:none; margin:0; }
+    .mode-rounds:focus-within { border-color:var(--primary); box-shadow:0 0 0 2px rgba(240,67,155,.12); }
     .btn-start {
-      padding: 11px 26px;
-      background: var(--primary);
-      border: none; border-radius: 12px;
-      color: #fff; font-family: var(--font-display); font-size: 0.95rem; font-weight: 700;
-      cursor: pointer; transition: filter 0.15s;
-      box-shadow: 0 0 22px rgba(240, 67, 155, 0.4);
+      min-height:35px; padding:8px 12px; flex:1;
+      border:1px solid color-mix(in srgb, var(--mode-accent) 60%, transparent); border-radius:7px;
+      background:color-mix(in srgb, var(--mode-accent) 88%, #111827);
+      color:#071018; font-family:var(--font-display); font-size:.72rem; font-weight:850;
+      text-transform:uppercase; letter-spacing:.035em; cursor:pointer;
+      box-shadow:0 0 18px color-mix(in srgb, var(--mode-accent) 20%, transparent);
+      transition:filter 120ms ease-out, transform 90ms ease-out, box-shadow 160ms ease-out;
     }
-    .btn-start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
-    .btn-start:hover:not(:disabled) { filter: brightness(1.1); }
-    .btn-relajo { background: var(--tertiary); color: #14210a; box-shadow: 0 0 22px rgba(163,230,53,0.35); }
+    .mode-classic .btn-start { color:#fff; }
+    .btn-start:hover:not(:disabled) { filter:brightness(1.16); box-shadow:0 0 26px color-mix(in srgb, var(--mode-accent) 32%, transparent); }
+    .btn-start:active:not(:disabled) { transform:scale(.97); }
+    .btn-start:focus-visible { outline:2px solid #fff; outline-offset:3px; }
+    .btn-start:disabled { opacity:.32; cursor:not-allowed; filter:saturate(.3); box-shadow:none; }
+
+    .mode-blocks { position:absolute; right:-12px; top:44px; width:104px; height:104px; opacity:.17; transform:rotate(-12deg); }
+    .mode-blocks span {
+      position:absolute; width:24px; height:24px; border:2px solid var(--mode-accent);
+      background:color-mix(in srgb, var(--mode-accent) 20%, transparent);
+      box-shadow:0 0 14px color-mix(in srgb, var(--mode-accent) 20%, transparent);
+    }
+    .mode-blocks span:nth-child(1) { left:0; top:24px; }
+    .mode-blocks span:nth-child(2) { left:26px; top:24px; }
+    .mode-blocks span:nth-child(3) { left:52px; top:24px; }
+    .mode-blocks span:nth-child(4) { left:52px; top:50px; }
+
+    @media (max-width: 820px) {
+      .mode-deck { width:min(430px,calc(100vw - 24px)); grid-template-columns:1fr; }
+      .mode-card-surface { min-height:190px; }
+      .mode-icon { margin-top:12px; }
+      .mode-deck-hint { display:none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .mode-picker-trigger::before { display:none; }
+      .mode-deck, .mode-card, .mode-card-surface, .mode-trigger-chevron, .stack-keyboard, .stack-keyboard kbd {
+        transition-duration:.01ms !important; transform:none !important;
+      }
+    }
 
     /* ── Modo Relajo: reloj comunitario ── */
+    /* SiluStack: tres focos claros — silueta, tablero compartido y ranking. */
+    #main-stack {
+      display: none;
+      grid-template-columns: minmax(210px, .68fr) minmax(470px, 1.42fr) minmax(210px, .62fr);
+      gap: clamp(16px, 2.4vw, 36px); align-items: stretch;
+      padding: 14px clamp(20px, 3vw, 48px); overflow: hidden;
+    }
+    .stack-brief { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+    .stack-board-panel {
+      min-width:0; position:relative; display:grid; grid-template-columns:minmax(0,auto) 104px;
+      grid-template-areas:'head stats' 'board stats';
+      grid-template-rows:auto auto; align-content:center; justify-content:center;
+      gap:9px 12px;
+    }
+    .stack-kicker { font-family: var(--font-mono); color: var(--secondary); text-transform: uppercase;
+      letter-spacing: .14em; font-size: .72rem; font-weight: 700; }
+    .stack-title { font-size: clamp(1.7rem, 3vw, 3rem); line-height: 1; font-weight: 900;
+      background: linear-gradient(90deg, var(--primary), var(--secondary));
+      -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .stack-silhouette { width: min(200px, 15vw); height: min(200px, 15vw); }
+    .stack-word { font-size: clamp(1.25rem, 2vw, 2rem); letter-spacing: 7px; }
+    .stack-pilot {
+      min-height: 52px; width: 100%; padding: 10px 14px; border-radius: 14px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.28);
+      color: var(--text-dim); text-align: center;
+    }
+    .stack-pilot strong { color: var(--tertiary); font-size: 1.05rem; }
+    .stack-board-head { grid-area:head; width:100%; display:flex; justify-content:space-between;
+      font-family:var(--font-mono); font-size:.78rem; color:var(--text-dim); }
+    .stack-grid {
+      grid-area:board; width:min(38vw,42dvh,440px); aspect-ratio:10 / 16; padding:clamp(6px,.7vw,9px);
+      display:grid; grid-template-columns:repeat(10,1fr); grid-template-rows:repeat(16,1fr);
+      gap:clamp(2px,.28vw,4px); border:1px solid rgba(34,211,238,.48); border-radius:18px;
+      background:linear-gradient(180deg,rgba(10,15,35,.96),rgba(3,5,14,.98));
+      box-shadow:0 0 54px rgba(34,211,238,.16),0 24px 50px rgba(0,0,0,.4),inset 0 0 28px rgba(0,0,0,.7);
+    }
+    .stack-cell { border-radius:clamp(2px,.25vw,4px); background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.035); }
+    .stack-cell.c1 { --cell:#22d3ee; } .stack-cell.c2 { --cell:#fbbf24; }
+    .stack-cell.c3 { --cell:#a855f7; } .stack-cell.c4 { --cell:#fb923c; }
+    .stack-cell.c5 { --cell:#3b82f6; } .stack-cell.c6 { --cell:#a3e635; }
+    .stack-cell.c7 { --cell:#f0439b; }
+    .stack-cell[class*=' c'] {
+      background:linear-gradient(145deg,color-mix(in srgb,var(--cell) 92%,white),color-mix(in srgb,var(--cell) 72%,#08101f));
+      border-color:color-mix(in srgb,var(--cell) 60%,white);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 0 9px color-mix(in srgb,var(--cell) 36%,transparent);
+    }
+    .stack-cell.c8 { --cell:#ef4444; background:repeating-linear-gradient(135deg,#ef4444 0 5px,#3f1822 5px 10px); }
+    .stack-cell.active { outline:2px solid rgba(255,255,255,.9); outline-offset:-2px; filter:brightness(1.18); }
+    .stack-grid:focus-visible { outline:2px solid var(--tertiary); outline-offset:5px; }
+    .stack-stats { grid-area:stats; width:104px; display:grid; grid-template-columns:1fr; gap:8px; }
+    .stack-stat { min-height:0; padding:8px 5px; border-radius:10px; text-align:center; background:var(--surface-glass);
+      border:1px solid var(--border-soft); font-family:var(--font-mono); display:flex; flex-direction:column; justify-content:center; }
+    .stack-stat b { display:block; color:var(--secondary); font-size:clamp(1rem,1.5vw,1.35rem); }
+    .stack-stat span { color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em; font-size:.55rem; }
+    .stack-clear { grid-area:board; align-self:end; justify-self:stretch; z-index:2; min-height:0; margin:0 10px 12px;
+      color:#07140b; background:transparent; border-radius:8px; font-weight:850; text-align:center; pointer-events:none; }
+    .stack-clear:not(:empty) { padding:7px 10px; background:rgba(163,230,53,.92); box-shadow:0 0 20px rgba(163,230,53,.25); }
+    .stack-keyboard {
+      width:100%; min-height:39px; padding:7px 10px; display:flex; align-items:center; justify-content:center; gap:7px;
+      border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(5,7,17,.72);
+      color:var(--text-faint); font:650 .62rem/1 var(--font-mono); text-transform:uppercase; letter-spacing:.05em;
+      transition:border-color 160ms ease-out,color 160ms ease-out,box-shadow 160ms ease-out;
+    }
+    .stack-keyboard.ready { color:var(--text-dim); border-color:rgba(163,230,53,.4); box-shadow:0 0 20px rgba(163,230,53,.08); }
+    .stack-keyboard kbd { min-width:25px; height:25px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center;
+      border:1px solid rgba(34,211,238,.35); border-bottom-width:3px; border-radius:6px; background:#12172a; color:var(--secondary);
+      font:800 .68rem/1 var(--font-mono); transition:transform 90ms ease-out,background-color 90ms ease-out; }
+    .stack-keyboard kbd.wide { min-width:48px; }
+    .stack-keyboard kbd.pressed { transform:translateY(2px); background:rgba(163,230,53,.2); color:var(--tertiary); }
+
+    @media (max-width: 980px) {
+      #main-stack { grid-template-columns:minmax(200px,.7fr) minmax(430px,1.3fr); }
+      #main-stack .rank-panel { display:none; }
+    }
+    @media (max-width: 760px) {
+      #main-stack { grid-template-columns:1fr; padding:14px; overflow:auto; }
+      #main-stack .stack-brief { display:none; }
+      .stack-board-panel { grid-template-columns:minmax(0,1fr); grid-template-areas:'head' 'board' 'stats'; justify-items:center; }
+      .stack-board-head, .stack-grid, .stack-stats { width:min(76vw,360px); }
+      .stack-grid { max-width:360px; }
+      .stack-stats { grid-template-columns:repeat(4,1fr); }
+      .stack-keyboard { display:none; }
+    }
     .relajo-bar {
       display: none; align-items: center; justify-content: center; gap: 28px;
       padding: 10px 28px; background: rgba(20,20,34,0.7);
@@ -407,6 +715,49 @@
     .hof-winner { display: inline-flex; align-items: center; gap: 5px; }
     .hof-winner .ico { width: 0.9rem; height: 0.9rem; }
     .hof-empty { color: var(--text-faint); font-size: 0.8rem; }
+
+    /* La pantalla maestra debe caber en laptops, proyectores y ventanas con zoom. */
+    @media (max-width: 920px) {
+      .vote-columns { width:100%; flex-direction:column; align-items:center; }
+      .vote-col, .vote-col-narrow { width:100%; min-width:0; }
+      .vote-col #mv-options { width:100%; }
+    }
+    @media (max-width: 640px) {
+      header { padding:10px 14px; gap:10px; }
+      .brand-logo { width:clamp(126px,34vw,155px); }
+      .puce-brand { padding-left:9px; }
+      .puce-logo { width:42px; }
+      .puce-text { display:none; }
+      .nodes { min-width:0; max-width:46vw; overflow-x:auto; }
+      .engine-strip { padding:7px 14px; gap:7px; }
+      .engine-log { display:none; }
+      main { padding:14px; grid-template-columns:1fr; }
+      #main-stack { grid-template-columns:1fr; overflow:auto; align-items:start; }
+      footer { padding:10px 12px; flex-direction:column; align-items:stretch; gap:8px; }
+      .player-info { text-align:center; }
+      .mode-picker, .mode-picker-trigger { width:100%; }
+      .mode-picker-trigger { min-width:0; }
+      .mode-deck { right:-1px; width:calc(100vw - 24px); }
+      .hof-block { width:min(100%,640px); flex-direction:column; }
+      .qr-block { max-width:100%; }
+      .qr-url { overflow-wrap:anywhere; }
+    }
+    @media (max-height: 720px) {
+      header { padding-top:9px; padding-bottom:9px; }
+      .engine-strip { padding-top:6px; padding-bottom:6px; }
+      main { padding-top:12px; padding-bottom:12px; }
+      #main-stack { overflow:auto; }
+      footer { padding-top:9px; padding-bottom:9px; }
+      .waiting-center { gap:10px; }
+      .big-logo { max-height:18dvh; object-fit:contain; }
+      .qr-block { padding:12px 18px; }
+      .mode-deck { padding:10px; gap:8px; }
+      .mode-deck-header { min-height:32px; }
+      .mode-card-surface { min-height:210px; padding:14px; }
+      .mode-icon { width:40px; height:40px; margin-top:12px; }
+      .mode-desc { min-height:42px; }
+      .mode-card-bottom { padding-top:9px; }
+    }
   </style>
   <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
        internet, así que una dependencia externa aquí rompería el QR entero. -->
@@ -433,9 +784,8 @@
   <div class="brand">
     <img class="brand-logo" src="/assets/silunet-wordmark-compact.png" alt="SILUNET" width="1200" height="294" fetchpriority="high">
     <div class="puce-brand">
-      <div class="puce-mark">PUCE</div>
+      <img class="puce-logo" src="/assets/puce-manabi-logo-transparent.png" alt="PUCE Manabí" width="287" height="367" fetchpriority="high">
       <div class="puce-text">
-        <span class="puce-name">PUCE Sede Manabí</span>
         <span class="puce-sub">Ingeniería de Software</span>
       </div>
     </div>
@@ -545,16 +895,127 @@
   </div>
 </main>
 
+<main id="main-stack">
+  <section class="stack-brief">
+    <p class="stack-kicker" id="ss-round">Pieza 1 · Nivel 1</p>
+    <h1 class="stack-title">SiluStack</h1>
+    <div class="cat-badge" id="ss-cat">Categoría</div>
+    <div class="silhouette-box stack-silhouette" id="ss-svg"></div>
+    <div class="hidden-word stack-word" id="ss-word"></div>
+    <div class="stack-pilot" id="ss-pilot" role="status" aria-live="polite">
+      <span>Adivina primero para pilotar</span>
+    </div>
+    <div class="stack-keyboard" id="ss-keyboard" aria-disabled="true">
+      <span>Control PC</span>
+      <kbd data-stack-key="KeyA">A</kbd><span>izq.</span>
+      <kbd data-stack-key="KeyW">W</kbd><span>rotar</span>
+      <kbd data-stack-key="KeyS">S</kbd><span>bajar</span>
+      <kbd data-stack-key="KeyD">D</kbd><span>der.</span>
+      <kbd class="wide" data-stack-key="Enter">Enter</kbd><span>fijar</span>
+    </div>
+  </section>
+
+  <section class="stack-board-panel">
+    <div class="stack-board-head">
+      <span>Tablero compartido</span>
+      <span id="ss-next">Siguiente: —</span>
+    </div>
+    <div class="stack-grid" id="ss-grid" role="img" tabindex="0" aria-label="Tablero de SiluStack"></div>
+    <div class="stack-stats">
+      <div class="stack-stat"><b id="ss-pieces">0</b><span>Piezas</span></div>
+      <div class="stack-stat"><b id="ss-lines">0</b><span>Líneas</span></div>
+      <div class="stack-stat"><b id="ss-combo">0</b><span>Combo</span></div>
+      <div class="stack-stat"><b id="ss-level">1</b><span>Nivel</span></div>
+    </div>
+    <p class="stack-clear" id="ss-clear"></p>
+  </section>
+
+  <aside class="rank-panel">
+    <p class="rank-header">Ranking en vivo</p>
+    <div class="rank-list" id="ss-ranking">
+      <p style="color:#6b7280; font-size:0.875rem">Sin datos aún...</p>
+    </div>
+  </aside>
+</main>
 <footer>
   <div class="player-info">
     Jugadores: <strong id="f-count">0</strong>
     &nbsp;|&nbsp;
     Estado: <span class="phase-badge" id="f-phase">Esperando</span>
   </div>
-  <div class="ctrl-btns">
-    <input class="rounds-input" id="rounds-input" type="number" value="8" min="1" max="8" title="Número de rondas (máx. 8)">
-    <button class="btn-start" id="btn-start" onclick="startGame()">Iniciar partida</button>
-    <button class="btn-start btn-relajo" id="btn-relajo" onclick="startGame('relajo')" title="Sin temáticas: todo mezclado y un reloj para todos">Modo Relajo</button>
+  <div class="mode-picker" id="mode-picker">
+    <button class="mode-picker-trigger" id="mode-picker-trigger" type="button"
+            aria-expanded="false" aria-controls="mode-deck" onclick="toggleModePicker(event)">
+      <span data-silunet-icon="gamepad"></span>
+      <span class="mode-trigger-copy">
+        <strong id="mode-picker-label">Elegir modo</strong>
+        <small>3 experiencias disponibles</small>
+      </span>
+      <span class="mode-trigger-chevron" data-silunet-icon="chevrons-down"></span>
+    </button>
+
+    <div class="mode-deck" id="mode-deck" role="group" aria-label="Selecciona un modo de juego">
+      <div class="mode-deck-header">
+        <div class="mode-deck-title">
+          <b>Selecciona tu partida</b>
+          <span>Adivina · compite · sobrevive</span>
+        </div>
+        <span class="mode-deck-hint">Mueve el cursor para explorar</span>
+      </div>
+
+      <article class="mode-card mode-classic" data-mode="clasico">
+        <div class="mode-card-surface">
+          <div class="mode-blocks" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div class="mode-card-top">
+            <span class="mode-number">MODE / 01</span>
+            <span class="mode-tag">Competitivo</span>
+          </div>
+          <div class="mode-icon"><span data-silunet-icon="trophy"></span></div>
+          <h2 class="mode-name">Clásico</h2>
+          <p class="mode-desc">Voten temática y dificultad. Acumulen puntos durante una serie corta de siluetas.</p>
+          <div class="mode-card-bottom">
+            <label class="mode-rounds" for="rounds-input">
+              Rondas
+              <input class="rounds-input" id="rounds-input" type="number" value="8" min="1" max="8"
+                     inputmode="numeric" title="Número de rondas, máximo 8">
+            </label>
+            <button class="btn-start" id="btn-start" type="button" onclick="startGame('clasico')">Jugar clásico</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="mode-card mode-relajo" data-mode="relajo">
+        <div class="mode-card-surface">
+          <div class="mode-blocks" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div class="mode-card-top">
+            <span class="mode-number">MODE / 02</span>
+            <span class="mode-tag">Cooperativo</span>
+          </div>
+          <div class="mode-icon"><span data-silunet-icon="clock"></span></div>
+          <h2 class="mode-name">Modo Relajo</h2>
+          <p class="mode-desc">Un reloj para todo el grupo. Cada respuesta correcta compra tiempo para continuar.</p>
+          <div class="mode-card-bottom">
+            <button class="btn-start" id="btn-relajo" type="button" onclick="startGame('relajo')">Entrar al relajo</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="mode-card mode-stack" data-mode="silustack">
+        <div class="mode-card-surface">
+          <div class="mode-blocks" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div class="mode-card-top">
+            <span class="mode-number">MODE / 03</span>
+            <span class="mode-tag">Infinito</span>
+          </div>
+          <div class="mode-icon"><span data-silunet-icon="gamepad"></span></div>
+          <h2 class="mode-name">SiluStack</h2>
+          <p class="mode-desc">Adivina para pilotar. Encaja cada pieza, completa líneas y evita que el tablero colapse.</p>
+          <div class="mode-card-bottom">
+            <button class="btn-start" id="btn-stack" type="button" onclick="startGame('silustack')">Construir y sobrevivir</button>
+          </div>
+        </div>
+      </article>
+    </div>
   </div>
 </footer>
 
@@ -667,6 +1128,9 @@
 
   let notifTimer  = null;
   let currentPhase = 'waiting';
+  let currentMode = 'clasico';
+  let currentStackState = null;
+  let currentStackTime = 18;
 
   // ── WebSocket con reconexión automática al clúster (Eje 4) ────────────────────
   // Misma lógica que /play: si el nodo al que está pegada ESTA pantalla (la que
@@ -726,6 +1190,7 @@
       case 'ROUND_START':    handleRoundStart(msg);    break;
       case 'TICK':           handleTick(msg);          break;
       case 'SHARED_CLOCK':   handleSharedClock(msg);   break;
+      case 'STACK_STATE':    handleStackState(msg);    break;
       case 'CORRECT_ANSWER': handleCorrectAnswer(msg); break;
       case 'ROUND_END':      handleRoundEnd(msg);      break;
       case 'RANKING':        handleRanking(msg);       break;
@@ -749,11 +1214,129 @@
   }
 
   connectWS();
+  // Selector arcade de modos. Los eventos personalizados permiten conectar
+  // música/sonidos después sin acoplarlos a esta interfaz.
+  const modePicker = document.getElementById('mode-picker');
+  const modePickerTrigger = document.getElementById('mode-picker-trigger');
+  const modePickerLabel = document.getElementById('mode-picker-label');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  // La baraja nace sobre el footer: calculamos el espacio real hasta el borde
+  // superior para que funcione igual con zoom, barras del navegador y proyectores.
+  function updateModeDeckViewport() {
+    const footer = document.querySelector('footer');
+    const footerTop = footer ? footer.getBoundingClientRect().top : window.innerHeight;
+    const availableHeight = Math.max(150, Math.floor(footerTop - 28));
+    modePicker.style.setProperty('--mode-deck-max-height', availableHeight + 'px');
+  }
+
+  function setModePickerOpen(open) {
+    if (open) updateModeDeckViewport();
+    modePicker.classList.toggle('open', open);
+    modePickerTrigger.setAttribute('aria-expanded', String(open));
+  }
+
+  function toggleModePicker(event) {
+    event.stopPropagation();
+    setModePickerOpen(!modePicker.classList.contains('open'));
+  }
+
+  modePicker.addEventListener('pointerenter', function() {
+    updateModeDeckViewport();
+    modePickerTrigger.setAttribute('aria-expanded', 'true');
+  });
+  modePicker.addEventListener('pointerleave', function() {
+    if (!modePicker.classList.contains('open') && !modePicker.matches(':focus-within')) {
+      modePickerTrigger.setAttribute('aria-expanded', 'false');
+    }
+  });
+  modePicker.addEventListener('focusin', function() {
+    modePickerTrigger.setAttribute('aria-expanded', 'true');
+  });
+  modePicker.addEventListener('focusout', function() {
+    window.setTimeout(function() {
+      if (!modePicker.classList.contains('open') && !modePicker.matches(':focus-within')) {
+        modePickerTrigger.setAttribute('aria-expanded', 'false');
+      }
+    }, 0);
+  });
+
+  document.querySelectorAll('.mode-card').forEach(function(card) {
+    const surface = card.querySelector('.mode-card-surface');
+    const mode = card.dataset.mode;
+
+    card.addEventListener('pointerenter', function() {
+      document.dispatchEvent(new CustomEvent('silunet:mode-preview', {
+        detail: { mode: mode }
+      }));
+    });
+    card.addEventListener('pointerleave', function() {
+      surface.style.setProperty('--rx', '0deg');
+      surface.style.setProperty('--ry', '0deg');
+      surface.style.setProperty('--mx', '50%');
+      surface.style.setProperty('--my', '50%');
+      document.dispatchEvent(new CustomEvent('silunet:mode-preview-end', {
+        detail: { mode: mode }
+      }));
+    });
+    card.addEventListener('pointermove', function(event) {
+      if (reducedMotion.matches) return;
+      const rect = surface.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+      surface.style.setProperty('--rx', ((.5 - y) * 7).toFixed(2) + 'deg');
+      surface.style.setProperty('--ry', ((x - .5) * 9).toFixed(2) + 'deg');
+      surface.style.setProperty('--mx', (x * 100).toFixed(1) + '%');
+      surface.style.setProperty('--my', (y * 100).toFixed(1) + '%');
+    });
+  });
+
+  document.addEventListener('pointerdown', function(event) {
+    if (!modePicker.contains(event.target)) setModePickerOpen(false);
+  });
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+      setModePickerOpen(false);
+      modePickerTrigger.focus();
+    }
+  });
+  window.addEventListener('resize', updateModeDeckViewport, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateModeDeckViewport, { passive: true });
+  }
+  updateModeDeckViewport();
+
+  const stackKeyboardActions = { KeyA: 'left', KeyD: 'right', KeyW: 'rotate', KeyS: 'down', Enter: 'drop' };
+  let lastStackKeyAt = 0;
+  document.addEventListener('keydown', function(event) {
+    const action = stackKeyboardActions[event.code];
+    if (!action || currentMode !== 'silustack' || !currentStackState?.active || !currentStackState.pilotId) return;
+    if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+    if (event.repeat && (action === 'rotate' || action === 'drop')) return;
+    const now = performance.now();
+    if (event.repeat && now - lastStackKeyAt < 55) return;
+    lastStackKeyAt = now;
+    event.preventDefault();
+    // /master NO pilota (CLAUDE.md: es solo lectura). Las teclas siguen
+    // iluminando el diagrama para que el público vea qué controla el piloto
+    // desde su celular, pero no se envía ninguna acción al servidor.
+    
+    const key = document.querySelector('[data-stack-key="' + event.code + '"]');
+    if (key) {
+      key.classList.add('pressed');
+      window.setTimeout(function() { key.classList.remove('pressed'); }, 90);
+    }
+  });
 
   function handlePlayerCount(msg) {
     document.getElementById('m-count').textContent = msg.count + ' jugador' + (msg.count === 1 ? '' : 'es');
     document.getElementById('f-count').textContent = msg.count;
     document.getElementById('btn-start').disabled = msg.count === 0;
+    document.getElementById('btn-relajo').disabled = msg.count === 0;
+    document.getElementById('btn-stack').disabled = msg.count === 0;
+    if (!modePicker.classList.contains('locked')) {
+      modePickerLabel.textContent = msg.count === 0 ? 'Esperando jugadores' : 'Elegir modo';
+    }
   }
 
   let returnToWaitingTimer = null;
@@ -771,6 +1354,7 @@
 
   // Modo Relajo: el reloj comunitario. Aparece su barra y se oculta al terminar.
   function handleSharedClock(msg) {
+    currentMode = 'relajo';
     const bar = document.getElementById('relajo-bar');
     bar.classList.add('show');
     const clock = document.getElementById('rj-clock');
@@ -781,6 +1365,8 @@
   }
 
   function handleVoteStart(msg) {
+    currentMode = 'clasico';
+    document.getElementById('main-stack').style.display = 'none';
     document.getElementById('relajo-bar').classList.remove('show');
     document.getElementById('mv-winner').textContent = '';
     document.getElementById('mv-total').textContent  = '0 votos';
@@ -793,6 +1379,7 @@
 
     document.getElementById('main-waiting').style.display = 'none';
     document.getElementById('main-game').style.display    = 'none';
+    document.getElementById('main-stack').style.display   = 'none';
     document.getElementById('main-voting').style.display  = 'flex';
     document.getElementById('btn-start').disabled = true;
   }
@@ -836,12 +1423,16 @@
     clearTimeout(returnToWaitingTimer); // si "Nueva partida" se clickeó rápido, cancela el regreso automático
     document.getElementById('m-round').textContent = `Ronda ${msg.roundNumber} / ${msg.totalRounds}`;
     document.getElementById('m-cat').textContent   = msg.category;
-    document.getElementById('m-svg').innerHTML     = msg.svg;
+    pintarSilueta(document.getElementById('m-svg'), msg);
+    document.getElementById('ss-cat').textContent  = msg.category;
+    pintarSilueta(document.getElementById('ss-svg'), msg);
     renderHiddenWord(msg.hiddenWord, 'm-word');
+    renderHiddenWord(msg.hiddenWord, 'ss-word');
     clearNotif();
     document.getElementById('main-waiting').style.display = 'none';
     document.getElementById('main-voting').style.display  = 'none';
-    document.getElementById('main-game').style.display    = 'grid';
+    document.getElementById('main-game').style.display    = currentMode === 'silustack' ? 'none' : 'grid';
+    document.getElementById('main-stack').style.display   = currentMode === 'silustack' ? 'grid' : 'none';
     document.getElementById('btn-start').disabled = true;
   }
 
@@ -868,6 +1459,7 @@
 
   function handleRoundStart(msg) {
     totalTime = msg.totalTime;
+    currentStackTime = msg.timeLeft;
     currentPhase = 'playing';
     paintRound(msg);
     document.getElementById('countdown-overlay').classList.remove('show');
@@ -876,8 +1468,11 @@
   }
 
   function handleTick(msg) {
+    currentStackTime = msg.timeLeft;
     updateTimer(msg.timeLeft, totalTime);
     renderHiddenWord(msg.hiddenWord, 'm-word');
+    renderHiddenWord(msg.hiddenWord, 'ss-word');
+    if (currentMode === 'silustack' && currentStackState) updateStackKicker();
     if (msg.timeLeft > 0 && msg.timeLeft <= 5) AudioFX.tick();
   }
 
@@ -888,8 +1483,29 @@
     AudioFX.correct();
   }
 
+
+  // La silueta puede venir como SVG inline del banco (msg.svg) o como PNG en
+  // archivo (msg.image, generado por scripts/procesar-imagenes.py). El PNG se
+  // inyecta como mascara para que tome el color del tema.
+  function pintarSilueta(caja, msg) {
+    if (!caja) return;
+    if (msg.image) {
+      caja.innerHTML = '<span class="silueta-img" style="--silueta:url('' + msg.image + '')"></span>';
+    } else {
+      caja.innerHTML = msg.svg;
+    }
+  }
+
   function handleRoundEnd(msg) {
+    if (currentMode === 'silustack') document.getElementById('ss-word').textContent = msg.word;
     clearNotif();
+    // La ronda cerro: la silueta da paso al objeto a color. Es el momento de
+    // pago del publico, y hasta aca no se podia mostrar sin regalar la palabra.
+    if (msg.reveal) {
+      const foto = '<img class="reveal-img" alt="" src="' + msg.reveal + '">';
+      document.getElementById('m-svg').innerHTML  = foto;
+      document.getElementById('ss-svg').innerHTML = foto;
+    }
     document.getElementById('m-word').innerHTML =
       msg.word.split('').map(c =>
         `<span class="revealed">${c}</span>`
@@ -907,12 +1523,16 @@
 
   function handleRanking(msg) {
     renderRanking(msg.entries);
+    document.getElementById('ss-ranking').innerHTML = document.getElementById('m-ranking').innerHTML;
     if (msg.final) {
       currentPhase = 'gameEnd';
       setPhase('gameEnd');
       document.getElementById('btn-start').disabled = false;
-      document.getElementById('btn-start').textContent = 'Nueva partida';
+      document.getElementById('btn-start').textContent = 'Jugar clásico';
+      modePicker.classList.remove('locked');
+      modePickerLabel.textContent = 'Elegir modo';
       document.getElementById('btn-relajo').disabled = false;
+      document.getElementById('btn-stack').disabled = false;
       AudioFX.gameEnd();
       // v2.1: la partida que acaba de terminar ya se persistió en la DB del
       // coordinador (game_over corre síncrono ahí) -> refresca el histórico.
@@ -925,6 +1545,7 @@
       returnToWaitingTimer = setTimeout(() => {
         document.getElementById('main-game').style.display    = 'none';
         document.getElementById('main-waiting').style.display = 'flex';
+        document.getElementById('main-stack').style.display   = 'none';
         // El reloj comunitario pertenece a la partida: al volver a la pantalla
         // de espera se oculta, si no queda marcando 0s indefinidamente.
         document.getElementById('relajo-bar').classList.remove('show');
@@ -932,11 +1553,80 @@
     }
   }
 
+  function updateStackKicker() {
+    if (!currentStackState) return;
+    document.getElementById('ss-round').textContent =
+      'Pieza ' + (currentStackState.pieces + 1) + ' · Nivel ' + currentStackState.level +
+      ' · ' + Math.max(0, currentStackTime) + 's';
+  }
+
+  function handleStackState(msg) {
+    const state = msg.state;
+    currentMode = 'silustack';
+    currentStackState = state;
+    document.getElementById('relajo-bar').classList.remove('show');
+    document.getElementById('main-waiting').style.display = 'none';
+    document.getElementById('main-voting').style.display = 'none';
+    document.getElementById('main-game').style.display = 'none';
+    document.getElementById('main-stack').style.display = 'grid';
+
+    const active = new Map((state.activeCells || []).map(function(cell) {
+      return [cell[0] + ':' + cell[1], state.active ? state.active.color : 0];
+    }));
+    const frag = document.createDocumentFragment();
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        const cell = document.createElement('span');
+        const activeColor = active.get(x + ':' + y);
+        const value = activeColor || state.board[y][x] || 0;
+        cell.className = 'stack-cell' + (value ? ' c' + value : '') + (activeColor ? ' active' : '');
+        frag.appendChild(cell);
+      }
+    }
+    const grid = document.getElementById('ss-grid');
+    grid.replaceChildren(frag);
+    grid.setAttribute('aria-label', 'Tablero SiluStack: ' + state.lines + ' líneas, nivel ' + state.level);
+    const keyboard = document.getElementById('ss-keyboard');
+    const keyboardReady = Boolean(state.active && state.pilotId);
+    keyboard.classList.toggle('ready', keyboardReady);
+    keyboard.setAttribute('aria-disabled', String(!keyboardReady));
+    if (keyboardReady && modePicker.contains(document.activeElement)) grid.focus({ preventScroll: true });
+    document.getElementById('ss-pieces').textContent = state.pieces;
+    document.getElementById('ss-lines').textContent = state.lines;
+    document.getElementById('ss-combo').textContent = state.combo;
+    document.getElementById('ss-level').textContent = state.level;
+    document.getElementById('ss-next').textContent = 'Siguiente: ' + state.nextKind;
+    document.getElementById('ss-clear').textContent = state.lastClear > 0
+      ? state.lastClear + ' línea' + (state.lastClear === 1 ? '' : 's') + ' · combo x' + state.combo
+      : '';
+
+    const pilot = document.getElementById('ss-pilot');
+    pilot.replaceChildren();
+    const label = document.createElement('span');
+    if (state.pilotNick) {
+      label.textContent = 'Piloto de esta pieza';
+      const name = document.createElement('strong');
+      name.textContent = state.pilotNick;
+      pilot.append(label, name);
+    } else {
+      label.textContent = 'Adivina primero para pilotar';
+      pilot.append(label);
+    }
+    updateStackKicker();
+  }
   function startGame(mode) {
+    const selectedMode = mode || 'clasico';
+    setModePickerOpen(false);
+    modePicker.classList.add('locked');
+    modePickerLabel.textContent = 'Partida en curso';
+    document.dispatchEvent(new CustomEvent('silunet:mode-selected', {
+      detail: { mode: selectedMode }
+    }));
     const rounds = parseInt(document.getElementById('rounds-input').value) || 8;
-    send({ type: 'START_GAME', totalRounds: rounds, mode: mode || 'clasico' });
+    send({ type: 'START_GAME', totalRounds: rounds, mode: selectedMode });
     document.getElementById('btn-start').disabled = true;
     document.getElementById('btn-relajo').disabled = true;
+    document.getElementById('btn-stack').disabled = true;
   }
 
   // ── UI helpers ─────────────────────────────────────────────────────────────

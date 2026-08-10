@@ -12,6 +12,10 @@
     star: '<polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3 12 2"/>',
     medal: '<circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/>',
     plug: '<path d="m12 22 1-5-3-3 5-1 1-5"/><path d="m9 7 1-5M14 8l3-4M7 11 3 3M16 13l3 3"/>',
+    'arrow-left': '<path d="m15 18-6-6 6-6"/>',
+    'arrow-right': '<path d="m9 18 6-6-6-6"/>',
+    'rotate-cw': '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+    'chevrons-down': '<path d="m7 7 5 5 5-5M7 13l5 5 5-5"/>',
   };
 
   function safeClassName(value = '') {

@@ -44,6 +44,11 @@ const MIME: Record<string, string> = {
   '.css':  'text/css',
   '.svg':  'image/svg+xml',
   '.ico':  'image/x-icon',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif':  'image/gif',
   '.woff2': 'font/woff2',
 };
 
@@ -397,6 +402,15 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
           lamport:  game.clock.tick(),
         });
       }
+      const stack = game.stackState();
+      if (stack) {
+        cluster.sendToPeer(msg.originNode, {
+          type: 'N_SEND_TO',
+          playerId: msg.playerId,
+          payload: { type: 'STACK_STATE', state: stack },
+          lamport: game.clock.tick(),
+        });
+      }
       break;
     }
 
@@ -433,6 +447,11 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
       break;
 
+    case 'N_FORWARD_STACK_ACTION':
+      if (!cluster.isCoordinator) return;
+      game.clock.update(msg.lamport);
+      game.stackAction(msg.playerId, msg.action);
+      break;
     // Seguidor reenvía el voto (categoría o dificultad) de su jugador al coordinador
     case 'N_FORWARD_VOTE':
       if (!cluster.isCoordinator) return;
@@ -583,6 +602,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           send(ws, { type: 'WELCOME', playerId, nick: player.nick, playerCount: game.getPlayerCount(), token: playerToken, returning, score: player.score, reconnected, avatarId, avatarKey });
           const roundInfo = game.getCurrentRoundInfo();
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
+          const stack = game.stackState();
+          if (stack) send(ws, { type: 'STACK_STATE', state: stack });
         } else {
           // Seguidor: reenviar al coordinador (incluido el token); la respuesta llega como N_SEND_TO
           cluster.sendToCoordinator({
@@ -662,6 +683,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
           const reloj = game.sharedClockState();
           if (reloj) send(ws, { type: 'SHARED_CLOCK', ...reloj });
+          const stack = game.stackState();
+          if (stack) send(ws, { type: 'STACK_STATE', state: stack });
         }
         // En seguidor, el master recibirá actualizaciones vía los próximos N_BROADCAST
         break;
@@ -685,6 +708,26 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         break;
       }
 
+      case 'STACK_ACTION': {
+        if (client.role === 'player' && client.playerId) {
+          if (cluster.isCoordinator) {
+            game.stackAction(client.playerId, msg.action);
+          } else {
+            cluster.sendToCoordinator({
+              type: 'N_FORWARD_STACK_ACTION',
+              playerId: client.playerId,
+              action: msg.action,
+              originNode: NODE_ID,
+              lamport: game.clock.tick(),
+            });
+          }
+        }
+        // /master es SOLO LECTURA (CLAUDE.md): no pilota. Antes reenviaba la
+        // acción con la identidad del piloto, así que cualquiera que abriera
+        // /master —que no pide autenticación— movía la pieza del jugador y
+        // ambas entradas competían.
+        break;
+      }
       case 'REQUEST_HINT': {
         if (!client.playerId || client.role !== 'player') return;
         if (cluster.isCoordinator) {

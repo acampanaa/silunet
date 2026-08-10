@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { WordEntry, Difficulty } from './types';
 
 // Siluetas SVG — todas usan fill="currentColor" para poder cambiar color vía CSS
@@ -107,22 +109,6 @@ const VENTILADOR = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg
   <ellipse cx="80" cy="125" rx="16" ry="34" fill="currentColor"/>
   <ellipse cx="35" cy="80" rx="34" ry="16" fill="currentColor"/>
   <ellipse cx="125" cy="80" rx="34" ry="16" fill="currentColor"/>
-</svg>`;
-
-const CHIP = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-  <rect x="45" y="45" width="70" height="70" rx="4" fill="currentColor"/>
-  <rect x="20" y="55" width="18" height="8" fill="currentColor"/>
-  <rect x="20" y="75" width="18" height="8" fill="currentColor"/>
-  <rect x="20" y="95" width="18" height="8" fill="currentColor"/>
-  <rect x="122" y="55" width="18" height="8" fill="currentColor"/>
-  <rect x="122" y="75" width="18" height="8" fill="currentColor"/>
-  <rect x="122" y="95" width="18" height="8" fill="currentColor"/>
-  <rect x="55" y="20" width="8" height="18" fill="currentColor"/>
-  <rect x="75" y="20" width="8" height="18" fill="currentColor"/>
-  <rect x="97" y="20" width="8" height="18" fill="currentColor"/>
-  <rect x="55" y="122" width="8" height="18" fill="currentColor"/>
-  <rect x="75" y="122" width="8" height="18" fill="currentColor"/>
-  <rect x="97" y="122" width="8" height="18" fill="currentColor"/>
 </svg>`;
 
 const MEMORIA = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
@@ -270,13 +256,77 @@ const PLACEHOLDER = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/sv
  */
 const ART: Record<string, string> = {
   MONITOR, TECLADO, RATON, LAPTOP, IMPRESORA, PROYECTOR, PARLANTE, VENTILADOR,
-  CHIP, MEMORIA, JOYSTICK,
+  MEMORIA, JOYSTICK,
   ROUTER, SERVIDOR, NUBE, MODEM, ANTENA, SWITCH: SWITCH_ICON, SATELITE, CABLE,
   TORRE, WIFI,
   TELEFONO, AUDIFONOS, CAMARA, RELOJ, CONTROL, DRON, MICROFONO, LENTES,
   TERMOSTATO, TIMBRE,
   DISCO, USB, TARJETA, DISCODURO, DISQUETE, CINTA,
 };
+
+// ---------------------------------------------------------------------------
+// Siluetas en archivo (public/images/)
+//
+// Además de las SVG de arriba, una palabra puede ilustrarse con imágenes
+// reales: scripts/procesar-imagenes.py deja por cada objeto
+//
+//     public/images/<tematica>/<palabra>-silueta.png   la silueta negra
+//     public/images/<tematica>/<palabra>.png           el objeto a color
+//
+// La carpeta se escanea UNA vez al arrancar en vez de mantener una lista a
+// mano: agregar una silueta nueva es copiar el archivo y reiniciar el nodo.
+// Si la carpeta no existe, el juego sigue igual con las SVG inline.
+// ---------------------------------------------------------------------------
+
+const IMAGES_DIR = path.join(__dirname, '..', 'public', 'images');
+const IMAGES_URL = '/images';
+const SUFIJO_SILUETA = '-silueta';
+const EXTENSIONES = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg']);
+
+interface ImagenesDePalabra {
+  /** Silueta negra: es la que se muestra DURANTE la ronda. */
+  silhouette?: string;
+  /** Objeto a color: se revela recién al cerrar la ronda. */
+  reveal?: string;
+}
+
+/** RATÓN -> raton, "Placa Madre" -> "placa madre". Igual que el script Python. */
+function normalizarNombre(texto: string): string {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function escanearImagenes(): Map<string, ImagenesDePalabra> {
+  const porPalabra = new Map<string, ImagenesDePalabra>();
+  let carpetas: fs.Dirent[];
+  try {
+    carpetas = fs.readdirSync(IMAGES_DIR, { withFileTypes: true });
+  } catch {
+    return porPalabra; // sin carpeta: todas las palabras usan su SVG inline
+  }
+
+  for (const carpeta of carpetas) {
+    if (!carpeta.isDirectory()) continue;
+    for (const archivo of fs.readdirSync(path.join(IMAGES_DIR, carpeta.name))) {
+      const ext = path.extname(archivo).toLowerCase();
+      if (!EXTENSIONES.has(ext)) continue;
+
+      const base = normalizarNombre(path.basename(archivo, path.extname(archivo)));
+      const esSilueta = base.endsWith(SUFIJO_SILUETA);
+      const clave = esSilueta ? base.slice(0, -SUFIJO_SILUETA.length) : base;
+
+      const url = `${IMAGES_URL}/${encodeURIComponent(carpeta.name)}/${encodeURIComponent(archivo)}`;
+      const actual = porPalabra.get(clave) ?? {};
+      // Un archivo sin sufijo NUNCA se usa como silueta: mostraría el objeto a
+      // color y regalaría la respuesta.
+      if (esSilueta) actual.silhouette = url;
+      else actual.reveal = url;
+      porPalabra.set(clave, actual);
+    }
+  }
+  return porPalabra;
+}
+
+const IMAGENES = escanearImagenes();
 
 /**
  * Dificultad derivada del LARGO de la palabra (no anotada a mano): así el
@@ -304,7 +354,7 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
 // de categoría + dificultad que salga votada tenga suficientes rondas.
 const CATEGORIES: Record<string, string[]> = {
   'Computadores': [
-    'CHIP', 'RATON', 'PLACA', 'TECLA', 'BOTON', 'PIXEL',
+    'RATON', 'PLACA', 'TECLA', 'PILA', 'PIXEL',
     'LAPTOP', 'WEBCAM', 'MONITOR', 'TECLADO', 'MEMORIA', 'PARLANTE', 'JOYSTICK', 'PANTALLA',
     'IMPRESORA', 'PROYECTOR', 'MICROCHIP', 'ORDENADOR', 'VENTILADOR', 'PROCESADOR',
   ],
@@ -349,11 +399,10 @@ const CATEGORIES: Record<string, string[]> = {
 // sin incluir la respuesta ni una variante directa de ella.
 const HINTS: Record<string, string> = {
   // Computadores
-  CHIP: 'Es una pieza diminuta que puede realizar millones de operaciones.',
   RATON: 'Se desplaza sobre una superficie para controlar el puntero.',
   PLACA: 'Sirve como base para conectar los componentes internos.',
   TECLA: 'Cada una representa una entrada que se presiona con los dedos.',
-  BOTON: 'Activa una acción cuando se presiona.',
+  PILA: 'Guarda energía para que un aparato funcione sin enchufe.',
   PIXEL: 'Es la unidad de color más pequeña que ves en una pantalla.',
   LAPTOP: 'Combina pantalla y teclado en un equipo que se puede transportar.',
   WEBCAM: 'Captura video para llamadas y transmisiones desde un equipo.',
@@ -531,13 +580,18 @@ if (missingHints.length > 0) {
 }
 
 export const WORD_BANK: WordEntry[] = Object.entries(CATEGORIES).flatMap(
-  ([category, words]) => words.map(word => ({
-    word,
-    category,
-    svg: ART[word] ?? PLACEHOLDER,
-    hint: HINTS[word],
-    difficulty: difficultyOf(word),
-  })),
+  ([category, words]) => words.map(word => {
+    const imagenes = IMAGENES.get(normalizarNombre(word));
+    return {
+      word,
+      category,
+      svg: ART[word] ?? PLACEHOLDER,
+      image: imagenes?.silhouette,
+      reveal: imagenes?.reveal,
+      hint: HINTS[word],
+      difficulty: difficultyOf(word),
+    };
+  }),
 );
 
 /** Categorías reales del banco con cuántas palabras tiene cada una, para que

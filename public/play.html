@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Silunet — Juego</title>
   <link rel="icon" type="image/png" href="/assets/silunet-mark.png">
   <style>
@@ -132,6 +132,21 @@
       50%      { border-color: rgba(163,230,53,0.5); }
     }
     .silhouette-box svg { width: 150px; height: 150px; }
+    /* Silueta en archivo (public/images/): el PNG es negro puro, asi que se
+       usa como MASCARA sobre currentColor. Pintarlo tal cual lo volveria
+       invisible sobre el fondo oscuro; asi hereda el color del tema igual
+       que los SVG con fill="currentColor". */
+    .silhouette-box .silueta-img {
+      width: 76%; height: 76%;
+      background-color: currentColor;
+      -webkit-mask: var(--silueta) center / contain no-repeat;
+      mask: var(--silueta) center / contain no-repeat;
+    }
+    /* El objeto a color, ya revelado: aca si es una imagen de verdad. */
+    .reveal-img {
+      width: 170px; height: 170px; object-fit: contain;
+      border-radius: 14px; display: block; margin: 0 auto;
+    }
     .hidden-word {
       font-size: 2rem; font-weight: 700; letter-spacing: 10px;
       color: var(--text); text-align: center; font-family: var(--font-mono);
@@ -180,6 +195,74 @@
     .relajo-row b { font-size: 1.05rem; color: var(--secondary); }
 
     /* Timer */
+    /* SiluStack en celular: tablero compacto + controles táctiles del piloto. */
+    .stack-mobile {
+      display:none; width:100%; padding:14px; overflow:hidden;
+      background:linear-gradient(145deg,rgba(34,211,238,.07),transparent 42%),rgba(8,11,25,.9);
+      border:1px solid rgba(34,211,238,.35); border-radius:18px;
+      box-shadow:0 18px 42px rgba(0,0,0,.3),inset 0 0 28px rgba(34,211,238,.035);
+    }
+    #s-playing.stack-mode { max-width:880px; }
+    .stack-mobile.show { display:block; }
+    .stack-mobile-layout { display:grid; grid-template-columns:auto minmax(112px,1fr); align-items:center; justify-content:center; gap:14px; }
+    .stack-mini-grid {
+      width:clamp(150px,40vw,190px); aspect-ratio:10 / 16; padding:5px;
+      display:grid; grid-template-columns:repeat(10,1fr); grid-template-rows:repeat(16,1fr);
+      gap:2px; border-radius:12px; background:linear-gradient(180deg,#090d20,#03050d);
+      border:1px solid rgba(34,211,238,.5); box-shadow:0 0 30px rgba(34,211,238,.14),inset 0 0 20px rgba(0,0,0,.72);
+    }
+    .stack-mini-cell { border-radius:2px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.025); }
+    .stack-mini-cell.c1 { --cell:#22d3ee; } .stack-mini-cell.c2 { --cell:#fbbf24; }
+    .stack-mini-cell.c3 { --cell:#a855f7; } .stack-mini-cell.c4 { --cell:#fb923c; }
+    .stack-mini-cell.c5 { --cell:#3b82f6; } .stack-mini-cell.c6 { --cell:#a3e635; }
+    .stack-mini-cell.c7 { --cell:#f0439b; }
+    .stack-mini-cell[class*=' c'] { background:linear-gradient(145deg,color-mix(in srgb,var(--cell) 92%,white),color-mix(in srgb,var(--cell) 70%,#08101f)); border-color:color-mix(in srgb,var(--cell) 55%,white); }
+    .stack-mini-cell.c8 { --cell:#ef4444; background:repeating-linear-gradient(135deg,#ef4444 0 3px,#441b26 3px 6px); }
+    .stack-mini-cell.active { outline:1px solid #fff; outline-offset:-1px; filter:brightness(1.18); }
+    .stack-mobile-meta { min-width:0; display:flex; flex-direction:column; gap:9px; }
+    .stack-mobile-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; }
+    .stack-mobile-stat { padding:8px 4px; text-align:center; border-radius:9px; background:var(--surface);
+      font-family:var(--font-mono); border:1px solid var(--border-soft); }
+    .stack-mobile-stat b { display:block; color:var(--secondary); font-size:1rem; }
+    .stack-mobile-stat span { color:var(--text-faint); font-size:.55rem; text-transform:uppercase; letter-spacing:.07em; }
+    .stack-mobile-pilot { color:var(--text-dim); font-size:.78rem; line-height:1.35; text-align:center; }
+    .stack-mobile-pilot strong { display:block; color:var(--tertiary); font-size:.9rem; }
+    .stack-mobile-keys { display:none; flex-wrap:wrap; align-items:center; justify-content:center; gap:5px; color:var(--text-faint); font:650 .58rem/1 var(--font-mono); text-transform:uppercase; }
+    .stack-mobile-keys kbd { min-width:24px; height:24px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center;
+      border:1px solid rgba(34,211,238,.35); border-bottom-width:3px; border-radius:6px; background:#11172b; color:var(--secondary); font:800 .66rem/1 var(--font-mono); }
+    .stack-mobile-keys kbd.wide { min-width:46px; }
+    .stack-mobile-keys.ready { color:var(--text-dim); }
+    .stack-mobile-keys kbd.pressed { transform:translateY(2px); color:var(--tertiary); background:rgba(163,230,53,.18); }
+    .stack-controls { display:none; grid-template-columns:repeat(3,1fr); grid-template-areas:'. rotate .' 'left down right' 'drop drop drop'; gap:8px; margin-top:12px; }
+    .stack-controls.show { display:grid; }
+    .stack-control {
+      min-height:56px; border-radius:13px; border:1px solid rgba(34,211,238,.42);
+      background:rgba(34,211,238,.1); color:var(--secondary); cursor:pointer;
+      display:flex; align-items:center; justify-content:center; gap:8px; touch-action:manipulation;
+      transition:transform 90ms ease-out,background-color 120ms ease-out,border-color 120ms ease-out;
+      -webkit-tap-highlight-color:rgba(34,211,238,.18);
+    }
+    .stack-control.rotate { grid-area:rotate; } .stack-control.left { grid-area:left; }
+    .stack-control.down { grid-area:down; } .stack-control.right { grid-area:right; }
+    .stack-control .ico { width:26px; height:26px; }
+    .stack-control.down .ico { transform:rotate(90deg); }
+    .stack-control:active:not(:disabled) { transform:scale(.96); background:rgba(34,211,238,.22); }
+    .stack-control:focus-visible { outline:2px solid var(--secondary); outline-offset:3px; }
+    .stack-control.drop { grid-area:drop; min-height:60px; color:#07141c; background:var(--tertiary); border-color:var(--tertiary); font:850 .82rem/1 var(--font-display); text-transform:uppercase; letter-spacing:.05em; }
+    .stack-control.drop .ico { width:28px; height:28px; }
+    .stack-control:disabled { opacity:.35; cursor:not-allowed; }
+    @media (min-width:700px) {
+      .stack-mobile { padding:18px; }
+      .stack-mobile-layout { grid-template-columns:minmax(260px,320px) minmax(190px,250px); gap:22px; }
+      .stack-mini-grid { width:min(32vw,320px); }
+      .stack-mobile-keys { display:flex; }
+      .stack-controls { max-width:590px; margin-left:auto; margin-right:auto; }
+    }
+    @media (max-width:420px) {
+      .stack-mobile-layout { grid-template-columns:1fr; }
+      .stack-mini-grid { width:min(230px,68vw); justify-self:center; }
+      .stack-mobile-stats { grid-template-columns:repeat(4,1fr); }
+    }
     .timer-row { display: flex; align-items: center; gap: 10px; width: 100%; }
     .timer-bar-bg { flex: 1; height: 8px; background: var(--border-soft); border-radius: 4px; overflow: hidden; }
     .timer-bar { height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary));
@@ -228,7 +311,7 @@
 
     @media (prefers-reduced-motion: reduce) {
       .silhouette-box, .hint-card.show, .notif { animation: none; }
-      .timer-bar { transition: none; }
+      .timer-bar, .stack-control, .stack-mobile-keys kbd { transition: none; }
     }
 
     /* Mini ranking */
@@ -518,6 +601,44 @@
     <div><span class="rj-lbl">Tu acierto suma</span><b id="p-rj-bonus">+2</b></div>
   </div>
 
+  <section class="stack-mobile" id="p-stack" aria-label="Controles de SiluStack">
+    <div class="stack-mobile-layout">
+      <div class="stack-mini-grid" id="p-stack-grid" role="img" aria-label="Tablero compartido"></div>
+      <div class="stack-mobile-meta">
+        <div class="stack-mobile-stats">
+          <div class="stack-mobile-stat"><b id="p-stack-level">1</b><span>Nivel</span></div>
+          <div class="stack-mobile-stat"><b id="p-stack-lines">0</b><span>Líneas</span></div>
+          <div class="stack-mobile-stat"><b id="p-stack-combo">0</b><span>Combo</span></div>
+          <div class="stack-mobile-stat"><b id="p-stack-next">—</b><span>Siguiente</span></div>
+        </div>
+        <p class="stack-mobile-pilot" id="p-stack-pilot" role="status" aria-live="polite">Adivina primero para pilotar.</p>
+        <div class="stack-mobile-keys" id="p-stack-keys" aria-disabled="true">
+          <kbd data-stack-player-key="KeyA">A</kbd><span>izq.</span>
+          <kbd data-stack-player-key="KeyW">W</kbd><span>rotar</span>
+          <kbd data-stack-player-key="KeyS">S</kbd><span>bajar</span>
+          <kbd data-stack-player-key="KeyD">D</kbd><span>der.</span>
+          <kbd class="wide" data-stack-player-key="Enter">Enter</kbd><span>fijar</span>
+        </div>
+      </div>
+    </div>
+    <div class="stack-controls" id="p-stack-controls">
+      <button class="stack-control rotate" type="button" onclick="submitStackAction('rotate')" aria-label="Rotar pieza">
+        <span data-silunet-icon="rotate-cw"></span>
+      </button>
+      <button class="stack-control left" type="button" onclick="submitStackAction('left')" aria-label="Mover a la izquierda">
+        <span data-silunet-icon="arrow-left"></span>
+      </button>
+      <button class="stack-control down" type="button" onclick="submitStackAction('down')" aria-label="Bajar una fila">
+        <span data-silunet-icon="arrow-right"></span>
+      </button>
+      <button class="stack-control right" type="button" onclick="submitStackAction('right')" aria-label="Mover a la derecha">
+        <span data-silunet-icon="arrow-right"></span>
+      </button>
+      <button class="stack-control drop" type="button" onclick="submitStackAction('drop')" aria-label="Fijar pieza en el tablero">
+        <span data-silunet-icon="chevrons-down"></span><strong>Fijar pieza</strong>
+      </button>
+    </div>
+  </section>
   <div class="timer-row" id="p-timer-row">
     <div class="timer-bar-bg"><div class="timer-bar" id="p-bar" style="width:100%"></div></div>
     <div class="timer-num" id="p-timer">24</div>
@@ -537,6 +658,7 @@
 
 <!-- Pantalla: fin de ronda -->
 <div id="s-roundEnd" class="screen">
+  <div id="re-image"></div>
   <p style="color:#6b7280;font-size:0.9rem">La palabra era</p>
   <div class="word-reveal" id="re-word"></div>
   <div class="solvers-list" id="re-solvers"></div>
@@ -559,6 +681,8 @@
   let totalTime   = 24;
   let solved      = false;
   let roundActive = false;
+  let currentMode = 'clasico';
+  let currentStackState = null;
   let currentRoundKey = null;
   let hintUsed    = false;
   let hintPending = false;
@@ -644,6 +768,7 @@
       case 'ROUND_START':     handleRoundStart(msg);    break;
       case 'TICK':            handleTick(msg);          break;
       case 'SHARED_CLOCK':    handleSharedClock(msg);   break;
+      case 'STACK_STATE':     handleStackState(msg);    break;
       case 'CORRECT_ANSWER':  handleCorrectAnswer(msg); break;
       case 'HINT_RESULT':     handleHintResult(msg);    break;
       case 'WRONG_ANSWER':    handleWrongAnswer();       break;
@@ -677,6 +802,9 @@
     if (r) r.classList.remove('show');
     const t = document.getElementById('p-timer-row');
     if (t) t.style.display = '';
+    const stack = document.getElementById('p-stack');
+    if (stack) stack.classList.remove('show');
+    currentStackState = null;
   }
 
   function handleWelcome(msg) {
@@ -728,6 +856,9 @@
   // Modo Relajo: reloj comunitario. Sustituye al temporizador de ronda, porque
   // lo que importa no es cuánto queda de ESTA silueta sino de la partida entera.
   function handleSharedClock(msg) {
+    currentMode = 'relajo';
+    document.getElementById('s-playing').classList.remove('stack-mode');
+    document.getElementById('p-stack').classList.remove('show');
     document.getElementById('p-relajo').classList.add('show');
     document.getElementById('p-timer-row').style.display = 'none';
     const c = document.getElementById('p-rj-clock');
@@ -737,7 +868,98 @@
     document.getElementById('p-rj-bonus').textContent = '+' + msg.bonusPerSolver;
   }
 
+  function handleStackState(msg) {
+    const state = msg.state;
+    currentMode = 'silustack';
+    currentStackState = state;
+    document.getElementById('s-playing').classList.add('stack-mode');
+    document.getElementById('p-relajo').classList.remove('show');
+    document.getElementById('p-timer-row').style.display = '';
+    document.getElementById('p-stack').classList.add('show');
+    document.getElementById('p-round').textContent = 'SiluStack · Pieza ' + (state.pieces + 1);
+
+    const active = new Map((state.activeCells || []).map(function(cell) {
+      return [cell[0] + ':' + cell[1], state.active ? state.active.color : 0];
+    }));
+    const frag = document.createDocumentFragment();
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        const cell = document.createElement('span');
+        const activeColor = active.get(x + ':' + y);
+        const value = activeColor || state.board[y][x] || 0;
+        cell.className = 'stack-mini-cell' + (value ? ' c' + value : '') + (activeColor ? ' active' : '');
+        frag.appendChild(cell);
+      }
+    }
+    const stackGrid = document.getElementById('p-stack-grid');
+    stackGrid.replaceChildren(frag);
+    stackGrid.setAttribute('aria-label', 'Tablero SiluStack: ' + state.lines + ' líneas, nivel ' + state.level);
+    document.getElementById('p-stack-level').textContent = state.level;
+    document.getElementById('p-stack-lines').textContent = state.lines;
+    document.getElementById('p-stack-combo').textContent = state.combo;
+    document.getElementById('p-stack-next').textContent = state.nextKind;
+
+    const isPilot = Boolean(state.active && state.pilotId === myPlayerId);
+    const pilot = document.getElementById('p-stack-pilot');
+    pilot.replaceChildren();
+    if (isPilot) {
+      const label = document.createElement('span');
+      label.textContent = 'Tú controlas esta pieza';
+      const name = document.createElement('strong');
+      name.textContent = 'Muévela o suéltala';
+      pilot.append(label, name);
+    } else if (state.pilotNick) {
+      const label = document.createElement('span');
+      label.textContent = 'Pilota';
+      const name = document.createElement('strong');
+      name.textContent = state.pilotNick;
+      pilot.append(label, name);
+    } else if (state.active) {
+      pilot.textContent = 'Adivina primero para tomar el control.';
+    } else {
+      pilot.textContent = 'Preparando la siguiente pieza...';
+    }
+
+    const controls = document.getElementById('p-stack-controls');
+    controls.classList.toggle('show', isPilot);
+    controls.querySelectorAll('button').forEach(function(button) {
+      button.disabled = !isPilot;
+    });
+    const keys = document.getElementById('p-stack-keys');
+    keys.classList.toggle('ready', isPilot);
+    keys.setAttribute('aria-disabled', String(!isPilot));
+    if (isPilot && window.matchMedia('(pointer:fine)').matches && document.activeElement === document.getElementById('p-input')) {
+      document.getElementById('p-input').blur();
+    }
+  }
+
+  function submitStackAction(action) {
+    if (!currentStackState || currentStackState.pilotId !== myPlayerId) return;
+    send({ type: 'STACK_ACTION', action: action });
+  }
+
+  const stackKeyboardActions = { KeyA: 'left', KeyD: 'right', KeyW: 'rotate', KeyS: 'down', Enter: 'drop' };
+  let lastStackKeyAt = 0;
+  document.addEventListener('keydown', function(event) {
+    const action = stackKeyboardActions[event.code];
+    if (!action || currentMode !== 'silustack' || currentStackState?.pilotId !== myPlayerId || !currentStackState.active) return;
+    if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+    if (event.repeat && (action === 'rotate' || action === 'drop')) return;
+    const now = performance.now();
+    if (event.repeat && now - lastStackKeyAt < 55) return;
+    lastStackKeyAt = now;
+    event.preventDefault();
+    submitStackAction(action);
+    const key = document.querySelector('[data-stack-player-key="' + event.code + '"]');
+    if (key) {
+      key.classList.add('pressed');
+      window.setTimeout(function() { key.classList.remove('pressed'); }, 90);
+    }
+  });
   function handleVoteStart(msg) {
+    currentMode = 'clasico';
+    document.getElementById('s-playing').classList.remove('stack-mode');
+    document.getElementById('p-stack').classList.remove('show');
     // volver al modo clásico: se recupera el temporizador de ronda
     document.getElementById('p-relajo').classList.remove('show');
     document.getElementById('p-timer-row').style.display = '';
@@ -813,10 +1035,23 @@
   // Pinta lo que ROUND_PREVIEW y ROUND_START comparten (categoría/silueta/
   // palabra). Un jugador que se une a mitad de ronda solo recibe ROUND_START
   // (sin preview previo) -> tiene que poder pintar la pantalla igual.
+
+  // La silueta puede venir como SVG inline del banco (msg.svg) o como PNG en
+  // archivo (msg.image, generado por scripts/procesar-imagenes.py). El PNG se
+  // inyecta como mascara para que tome el color del tema.
+  function pintarSilueta(caja, msg) {
+    if (!caja) return;
+    if (msg.image) {
+      caja.innerHTML = '<span class="silueta-img" style="--silueta:url('' + msg.image + '')"></span>';
+    } else {
+      caja.innerHTML = msg.svg;
+    }
+  }
+
   function paintRound(msg) {
     document.getElementById('p-round').textContent    = `Ronda ${msg.roundNumber}/${msg.totalRounds}`;
     document.getElementById('p-category').textContent = msg.category;
-    document.getElementById('p-svg').innerHTML        = msg.svg;
+    pintarSilueta(document.getElementById('p-svg'), msg);
     renderHiddenWord(msg.hiddenWord);
     clearNotif();
     showScreen('s-playing');
@@ -966,7 +1201,24 @@
   }
 
   function handleRoundEnd(msg) {
+    if (currentMode === 'silustack') {
+      roundActive = false;
+      const cleared = currentStackState && currentStackState.lastClear > 0;
+      showNotif(
+        msg.solvers.length > 0
+          ? (cleared ? 'Pieza encajada y línea completada.' : 'Pieza encajada. Siguiente silueta...')
+          : 'Nadie acertó: la pieza quedó corrupta.',
+        msg.solvers.length > 0 ? 'success' : 'error',
+        1600
+      );
+      AudioFX.roundEnd(msg.solvers.length > 0);
+      return;
+    }
     roundActive = false;
+    // Recien ahora se puede mostrar el objeto a color: la ronda ya cerro.
+    document.getElementById('re-image').innerHTML = msg.reveal
+      ? '<img class="reveal-img" alt="" src="' + msg.reveal + '">'
+      : '';
     document.getElementById('re-word').textContent = msg.word;
     const el = document.getElementById('re-solvers');
     if (msg.solvers.length === 0) {
@@ -994,6 +1246,7 @@
     }
     if (msg.final) {
       salirDeRelajo();
+      currentMode = 'clasico';
       renderFinalRanking(msg.entries);
       showScreen('s-gameEnd');
       AudioFX.gameEnd();

@@ -8,7 +8,34 @@ export type GamePhase = 'waiting' | 'voting' | 'countdown' | 'playing' | 'roundE
 // 'relajo' : sin votación ni temáticas — el banco completo mezclado y un
 //            RELOJ COMPARTIDO por todo el público que solo se alarga cuando
 //            alguien acierta. Termina cuando ese reloj llega a cero.
-export type GameMode = 'clasico' | 'relajo';
+export type GameMode = 'clasico' | 'relajo' | 'silustack';
+
+export type StackPieceKind = 'I' | 'O' | 'T' | 'L' | 'J' | 'S' | 'Z';
+export type StackAction = 'left' | 'right' | 'rotate' | 'down' | 'drop';
+
+export interface StackPiece {
+  kind: StackPieceKind;
+  rotation: number;
+  x: number;
+  y: number;
+  color: number;
+}
+
+export interface StackState {
+  width: number;
+  height: number;
+  board: number[][];
+  active: StackPiece | null;
+  activeCells: Array<[number, number]>;
+  nextKind: StackPieceKind;
+  pilotId?: string;
+  pilotNick?: string;
+  pieces: number;
+  lines: number;
+  combo: number;
+  level: number;
+  lastClear: number;
+}
 
 export interface Player {
   id: string;
@@ -43,6 +70,12 @@ export interface WordEntry {
   svg: string;
   hint: string;
   difficulty: Difficulty;
+  // Silueta en archivo (public/images/). Si está, el cliente la muestra en
+  // lugar del SVG inline; si no, `svg` sigue siendo el camino normal.
+  image?: string;
+  // El objeto a color. Solo se manda al CERRAR la ronda: antes regalaría
+  // la respuesta.
+  reveal?: string;
 }
 
 export interface RoundState {
@@ -144,6 +177,7 @@ export interface GameSnapshot {
   mode: GameMode;
   sharedClock: number;
   cleared: number;
+  stack: StackState | null;
 }
 
 // Mensajes servidor → cliente
@@ -168,22 +202,23 @@ export type S2C =
   | { type: 'VOTE_RESULT'; winner: string; difficulty: string; difficultyLabel: string }
   // Se conoce la siguiente ronda (categoría/silueta/palabra) pero el timer real
   // TODAVÍA no arrancó -> los clientes pintan la pantalla y esperan COUNTDOWN.
-  | { type: 'ROUND_PREVIEW'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string }
+  | { type: 'ROUND_PREVIEW'; roundNumber: number; totalRounds: number; category: string; svg: string; image?: string; hiddenWord: string }
   // "3, 2, 1, ¡YA!" — value 3→1 cuenta, 0 = arranca (mismo instante que ROUND_START).
   // La emite el coordinador para TODOS al mismo tiempo (Eje 1): si cada celular
   // la mostrara por su cuenta, el timer real ya estaría corriendo mientras el
   // jugador todavía ve "3, 2, 1" y perdería segundos reales de la ronda.
   | { type: 'COUNTDOWN'; value: number }
-  | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; hiddenWord: string; timeLeft: number; totalTime: number }
+  | { type: 'ROUND_START'; roundNumber: number; totalRounds: number; category: string; svg: string; image?: string; hiddenWord: string; timeLeft: number; totalTime: number }
   | { type: 'TICK'; timeLeft: number; hiddenWord: string }
   // Modo Relajo: pulso del reloj comunitario. `cleared` es el contador de
   // siluetas que el grupo lleva despejadas (el récord que intenta batir).
   | { type: 'SHARED_CLOCK'; secondsLeft: number; cleared: number; bonusPerSolver: number }
+  | { type: 'STACK_STATE'; state: StackState }
   | { type: 'CORRECT_ANSWER'; nick: string; playerId: string; position: number; lamport: number; usedHint: boolean }
   | { type: 'HINT_RESULT'; status: 'revealed' | 'locked' | 'unavailable'; hint?: string; secondsLeft?: number; penaltyPercent?: number; alreadyUsed?: boolean }
   | { type: 'WRONG_ANSWER' }
   | { type: 'ALREADY_SOLVED' }
-  | { type: 'ROUND_END'; word: string; solvers: Array<{ nick: string; points: number; position: number; lamport: number; usedHint: boolean }> }
+  | { type: 'ROUND_END'; word: string; reveal?: string; solvers: Array<{ nick: string; points: number; position: number; lamport: number; usedHint: boolean }> }
   | { type: 'RANKING'; entries: RankEntry[]; final: boolean }
   // v2: perfil persistente solicitado por el celular (null si el token no existe)
   | { type: 'PROFILE'; profile: Perfil | null }
@@ -218,6 +253,7 @@ export type N2N =
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; mode: GameMode; lamport: number }
+  | { type: 'N_FORWARD_STACK_ACTION'; playerId: string; action: StackAction; originNode: string; lamport: number }
   // Votación de categoría: seguidor reenvía el voto de su jugador al coordinador
   | { type: 'N_FORWARD_VOTE';  playerId: string; kind: 'category' | 'difficulty'; option: string; originNode: string; lamport: number }
   // v2: seguidor pide al coordinador el perfil de un jugador (solo el coord. tiene DB)
@@ -237,6 +273,7 @@ export type C2S =
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'REQUEST_HINT' }
   | { type: 'START_GAME'; totalRounds?: number; mode?: GameMode }
+  | { type: 'STACK_ACTION'; action: StackAction }
   // Voto de categoría o de dificultad — uno de cada por jugador, se puede cambiar
   | { type: 'CAST_VOTE'; kind: 'category' | 'difficulty'; option: string }
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente

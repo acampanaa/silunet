@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SILUNET | Candy-Tech Tournament Scoreboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;family=Inter:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            background-color: #0d0d18;
+            color: #e3e0f1;
+            overflow: hidden;
+            font-family: 'Sora', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .neon-glow-fuchsia {
+            box-shadow: 0 0 20px rgba(240, 67, 155, 0.4);
+        }
+        .neon-glow-cyan {
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
+        }
+        .neon-glow-lime {
+            box-shadow: 0 0 20px rgba(163, 230, 53, 0.4);
+        }
+        .glass-panel {
+            background: rgba(18, 18, 29, 0.85);
+            backdrop-filter: blur(25px);
+            border: 1px solid rgba(223, 190, 200, 0.1);
+        }
+        .fui-grid-bg {
+            background-image: radial-gradient(rgba(34, 211, 238, 0.08) 1.5px, transparent 0);
+            background-size: 50px 50px;
+        }
+        .silhouette-container {
+            filter: drop-shadow(0 0 40px rgba(240, 67, 155, 0.3));
+        }
+        @keyframes pulse-border-cyan {
+            0%, 100% { border-color: rgba(34, 211, 238, 0.2); }
+            50% { border-color: rgba(34, 211, 238, 0.8); }
+        }
+        .animate-pulse-border-cyan {
+            animation: pulse-border-cyan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary": "#F0439B", /* Vibrant Fuchsia */
+                      "secondary": "#22D3EE", /* Cyan */
+                      "tertiary": "#A3E635", /* Lime */
+                      "error": "#EF4444", /* Red */
+                      "surface": "#12121d",
+                      "on-surface": "#e3e0f1",
+                      "surface-container": "#1f1e2a",
+                      "outline-variant": "#584049",
+                      "on-surface-variant": "#dfbec8"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "sm": "16px",
+                      "lg": "40px",
+                      "base": "4px",
+                      "xs": "8px",
+                      "md": "24px",
+                      "xl": "64px"
+              },
+              "fontFamily": {
+                      "display-lg": ["Sora"],
+                      "headline-md": ["Sora"],
+                      "label-caps": ["JetBrains Mono"],
+                      "body-base": ["Sora"],
+                      "data-mono": ["JetBrains Mono"]
+              },
+              "fontSize": {
+                      "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                      "headline-md": ["24px", {"lineHeight": "1.3", "fontWeight": "700"}],
+                      "label-caps": ["12px", {"lineHeight": "1", "fontWeight": "700"}],
+                      "body-base": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "data-mono": ["14px", {"lineHeight": "1.5", "letterSpacing": "0.05em", "fontWeight": "500"}]
+              }
+            }
+          }
+        }
+      </script>
+</head>
+<body class="fui-grid-bg min-h-screen relative">
+<!-- TOP NAVIGATION SHELL -->
+<header class="flex justify-between items-center w-full px-md h-20 sticky top-0 z-50 bg-surface/90 backdrop-blur-xl border-b border-secondary/20 shadow-[0_0_20px_rgba(34,211,238,0.1)]">
+<div class="flex items-center gap-sm">
+<span class="font-display-lg text-display-lg bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">SILUNET</span>
+<div class="h-8 w-[1px] bg-outline-variant/30 mx-xs"></div>
+<div class="flex items-center gap-xs">
+<img class="h-10 w-auto opacity-90 brightness-125" data-alt="University Logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCzRoMzbyKv13cldvOga2uoQUHFg7C6M8kJXvlUQHY6iHLHosEMWAbcrZoJQZJUIRf_Y52IZfOKLbDH8w-Xo9wL1MUMouvLRRxvPelD0lvUXxS7WLQXJAqEio0ktWsGc1QW4KQxZR5wi1qxi42HaeTABI3h4R5kTLdqtgRrjb5WsYlP2toM8HeSgbpDa_gZeOZWcTHNRgt8Tp5RjEssrS9kZJv4a-UqqRalRleEUWed_7LZSwuYk4Rvi0EP29uhFAzVqZv-0Xrl3uYg"/>
+<span class="font-headline-md text-headline-md text-on-surface tracking-tight">PUCE</span>
+</div>
+</div>
+<div class="flex gap-md">
+<div class="flex flex-col items-end">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase text-[10px]">Event State</span>
+<span class="font-data-mono text-data-mono text-secondary flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse neon-glow-cyan"></span>
+                    LIVE TRANSMISSION
+                </span>
+</div>
+<div class="flex gap-xs items-center">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">settings</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">notifications</span>
+</div>
+</div>
+</header>
+<main class="grid grid-cols-12 gap-md p-md h-[calc(100vh-80px)]">
+<!-- SIDE PANEL: Technical Cluster -->
+<aside class="col-span-3 flex flex-col gap-md">
+<!-- Node Cluster Indicators -->
+<section class="glass-panel rounded-xl p-sm border-l-4 border-tertiary">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-sm flex items-center justify-between">
+                    CLUSTER NODES
+                    <span class="material-symbols-outlined text-sm text-tertiary">hub</span>
+</h3>
+<div class="space-y-xs">
+<!-- Node 1: Active (Lime) -->
+<div class="flex items-center justify-between p-xs bg-tertiary/5 rounded-lg border border-tertiary/20">
+<div class="flex items-center gap-sm">
+<span class="w-3 h-3 rounded-full bg-tertiary neon-glow-lime"></span>
+<span class="font-data-mono text-data-mono text-on-surface">NODE_01</span>
+</div>
+<span class="text-[10px] font-bold text-surface bg-tertiary px-xs py-0.5 rounded uppercase">Active</span>
+</div>
+<!-- Node 2: Coordinator (Cyan) -->
+<div class="flex items-center justify-between p-xs bg-secondary/5 rounded-lg border border-secondary/30 relative overflow-hidden">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary text-sm" style="font-variation-settings: 'FILL' 1;">crown</span>
+<span class="font-data-mono text-data-mono text-secondary">NODE_02</span>
+</div>
+<span class="text-[10px] font-bold text-surface bg-secondary px-xs py-0.5 rounded uppercase">Coordinator</span>
+</div>
+<!-- Node 3: Down -->
+<div class="flex flex-col gap-xs p-xs bg-error/10 rounded-lg border border-error/20">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="w-3 h-3 rounded-full bg-error animate-pulse shadow-[0_0_10px_#EF4444]"></span>
+<span class="font-data-mono text-data-mono text-error">NODE_03</span>
+</div>
+<span class="text-[10px] font-bold text-on-surface bg-error px-xs py-0.5 rounded uppercase">Down</span>
+</div>
+<div class="bg-error/10 text-error text-[11px] font-medium p-1 rounded flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px]">sync</span>
+                            Reconnecting...
+                        </div>
+</div>
+</div>
+</section>
+<!-- Didactic Indicators -->
+<section class="glass-panel rounded-xl p-sm border-l-4 border-secondary flex-1 flex flex-col gap-sm">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant flex items-center justify-between">
+                    SYSTEM METRICS
+                    <span class="material-symbols-outlined text-sm text-secondary">analytics</span>
+</h3>
+<div class="flex-1 space-y-md mt-xs">
+<!-- Lamport Clock (Cyan) -->
+<div class="space-y-1">
+<label class="font-label-caps text-[10px] text-on-surface-variant uppercase opacity-70">Reloj Lamport</label>
+<div class="font-data-mono text-[42px] text-secondary leading-none tabular-nums drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" id="lamport-clock">102</div>
+</div>
+<!-- Mutex Marker (Neutral Red) -->
+<div class="space-y-1">
+<label class="font-label-caps text-[10px] text-on-surface-variant uppercase opacity-70">Mutex Marcador</label>
+<div class="inline-flex items-center gap-xs px-sm py-xs rounded-full bg-error/20 text-error font-data-mono text-data-mono border border-error/40">
+<span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+                            OCUPADO
+                        </div>
+</div>
+<!-- Bully Election (Cyan) -->
+<div class="space-y-1">
+<label class="font-label-caps text-[10px] text-on-surface-variant uppercase opacity-70">Bully Election</label>
+<div class="flex items-center gap-xs font-data-mono text-data-mono text-secondary/40">
+<span class="material-symbols-outlined text-[18px]">radio_button_unchecked</span>
+                            INACTIVO
+                        </div>
+</div>
+</div>
+<div class="mt-auto pt-sm border-t border-outline-variant/10">
+<div class="text-[10px] font-data-mono text-secondary bg-secondary/10 p-2 rounded border border-secondary/20">
+                        CORE_VERSION: 2.4.0-CANDY<br/>
+                        STATUS: SYNC_VERIFIED
+                    </div>
+</div>
+</section>
+</aside>
+<!-- MAIN BODY: Content Display -->
+<div class="col-span-9 grid grid-cols-9 gap-md">
+<!-- LEFT: Central Silhouette Audience View -->
+<section class="col-span-6 glass-panel rounded-2xl flex flex-col items-center justify-center relative overflow-hidden animate-pulse-border-cyan">
+<div class="absolute top-4 left-4 z-10 flex gap-xs">
+<span class="bg-primary/20 text-primary px-xs py-1 rounded-sm font-label-caps text-[10px] border border-primary/40 neon-glow-fuchsia">CURRENT ENTITY</span>
+<span class="bg-secondary/10 text-secondary px-xs py-1 rounded-sm font-label-caps text-[10px] border border-secondary/40">PHASE 2</span>
+</div>
+<!-- Silhouette Content -->
+<div class="relative z-10 silhouette-container w-4/5 h-4/5 flex items-center justify-center">
+<img class="max-h-full object-contain filter drop-shadow-[0_0_30px_rgba(240,67,155,0.2)]" data-alt="Silhouette" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKpLnGEtIXDn3FUKskFgSm2Yy-SF4X3BJrCw4Tg2-E2lCc3wvZshLLVSPhJ1LCAbSecZUEsI2Hwj9utB1mwvhJa245HP5EduIn7p5fgAt_iiSIShkuFkzTyf7qfyl-zL__LQfFY9DzVjK4L2md5o0YFwMdXcigCGJM8BUC7jq2W8f4rKZgcecc_xVODyIMeBz0wLESb3UNT-DK1lVbYlomozI8F_LfgjE81G1Aq68IfrrDgwxyA2M9nQBqc12QYDKG51E3gKulp2Of"/>
+</div>
+<!-- Technical Overlay Decorations -->
+<div class="absolute inset-0 pointer-events-none opacity-30">
+<div class="absolute top-0 right-0 p-lg font-data-mono text-[10px] text-secondary text-right">
+                        X: 42.091<br/>Y: 18.232<br/>Z: 00.129
+                    </div>
+<div class="absolute bottom-0 left-0 p-lg font-data-mono text-[10px] text-secondary">
+                        SCAN_RADAR: ACTIVE<br/>FREQ: 4.2GHz
+                    </div>
+<!-- Frame corners -->
+<div class="absolute top-4 left-4 w-8 h-8 border-t-2 border-l-2 border-primary/60"></div>
+<div class="absolute top-4 right-4 w-8 h-8 border-t-2 border-r-2 border-primary/60"></div>
+<div class="absolute bottom-4 left-4 w-8 h-8 border-b-2 border-l-2 border-primary/60"></div>
+<div class="absolute bottom-4 right-4 w-8 h-8 border-b-2 border-r-2 border-primary/60"></div>
+</div>
+<div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-xs">
+<div class="w-64 h-1.5 bg-surface-container rounded-full overflow-hidden border border-outline-variant/20">
+<div class="h-full bg-gradient-to-r from-primary to-secondary w-2/3 shadow-[0_0_15px_#F0439B]"></div>
+</div>
+<span class="font-label-caps text-label-caps text-primary tracking-widest uppercase text-[10px] font-bold">Analyzing Silhouette...</span>
+</div>
+</section>
+<!-- RIGHT: Live Ranking Board -->
+<section class="col-span-3 glass-panel rounded-2xl p-md flex flex-col border-t-4 border-primary">
+<h2 class="font-headline-md text-headline-md text-on-surface mb-md flex items-center justify-between">
+                    LEADERBOARD
+                    <span class="material-symbols-outlined text-primary">leaderboard</span>
+</h2>
+<div class="flex flex-col gap-sm flex-1">
+<!-- Rank 1: Fuchsia Highlight -->
+<div class="flex items-center justify-between p-sm rounded-xl bg-gradient-to-r from-primary/30 to-primary/5 border-2 border-primary/60 shadow-[0_0_25px_rgba(240,67,155,0.2)]">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary text-3xl" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+<div>
+<div class="font-headline-md text-sm text-on-surface">PILOT_X_ZERO</div>
+<div class="font-label-caps text-[10px] text-primary font-bold">TOP SCORER</div>
+</div>
+</div>
+<div class="font-data-mono text-headline-md text-primary drop-shadow-[0_0_8px_rgba(240,67,155,0.6)]">2,840</div>
+</div>
+<!-- Rank 2: Cyan Highlight -->
+<div class="flex items-center justify-between p-sm rounded-xl bg-secondary/5 border border-secondary/30">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary text-2xl" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+<div>
+<div class="font-headline-md text-sm text-on-surface">NEON_DRIFTER</div>
+<div class="font-label-caps text-[10px] text-secondary opacity-80">2nd PLACE</div>
+</div>
+</div>
+<div class="font-data-mono text-headline-md text-secondary">2,610</div>
+</div>
+<!-- Rank 3: Cyan Highlight -->
+<div class="flex items-center justify-between p-sm rounded-xl bg-secondary/5 border border-secondary/30">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary text-2xl" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+<div>
+<div class="font-headline-md text-sm text-on-surface">C_SHARP_GUNNER</div>
+<div class="font-label-caps text-[10px] text-secondary opacity-80">3rd PLACE</div>
+</div>
+</div>
+<div class="font-data-mono text-headline-md text-secondary">2,595</div>
+</div>
+<!-- Standard Rows: Cyan Accents -->
+<div class="mt-md space-y-xs">
+<div class="flex items-center justify-between px-sm py-xs border-b border-secondary/10">
+<span class="font-data-mono text-xs text-secondary/70">04. BIT_MAESTRO</span>
+<span class="font-data-mono text-xs text-secondary">2,400</span>
+</div>
+<div class="flex items-center justify-between px-sm py-xs border-b border-secondary/10">
+<span class="font-data-mono text-xs text-secondary/70">05. VOID_WALKER</span>
+<span class="font-data-mono text-xs text-secondary">2,380</span>
+</div>
+<div class="flex items-center justify-between px-sm py-xs border-b border-secondary/10">
+<span class="font-data-mono text-xs text-secondary/70">06. ARCH_USER</span>
+<span class="font-data-mono text-xs text-secondary">2,120</span>
+</div>
+</div>
+</div>
+<div class="mt-auto pt-md flex items-center justify-between text-secondary/50 font-label-caps text-[10px]">
+<span>LAST UPDATE: 12:45:01</span>
+<span class="flex items-center gap-1">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full animate-pulse neon-glow-cyan"></span>
+                        LIVE STREAMING
+                    </span>
+</div>
+</section>
+</div>
+</main>
+<!-- ATMOSPHERIC BACKGROUND OVERLAY -->
+<div class="fixed inset-0 pointer-events-none z-[-1] opacity-40 overflow-hidden">
+<div class="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-primary rounded-full blur-[180px] opacity-20"></div>
+<div class="absolute -bottom-[10%] -right-[10%] w-[50%] h-[50%] bg-secondary rounded-full blur-[180px] opacity-20"></div>
+<div class="absolute top-1/2 left-1/4 w-[30%] h-[30%] bg-tertiary rounded-full blur-[200px] opacity-10"></div>
+</div>
+<script>
+        // Micro-interaction: Lamport Clock increments randomly
+        let clockVal = 102;
+        const clockElement = document.getElementById('lamport-clock');
+        
+        setInterval(() => {
+            clockVal += Math.floor(Math.random() * 3);
+            clockElement.textContent = clockVal;
+            // Visual pulse on update
+            clockElement.classList.add('scale-110', 'text-white');
+            setTimeout(() => {
+                clockElement.classList.remove('scale-110', 'text-white');
+            }, 100);
+        }, 3500);
+
+        // Interaction for Node 3 "reconnecting" animation logic
+        const node3Label = document.querySelector('.bg-error\\/10 .material-symbols-outlined');
+        let rotate = 0;
+        function rotateSync() {
+            rotate += 5;
+            node3Label.style.transform = `rotate(${rotate}deg)`;
+            requestAnimationFrame(rotateSync);
+        }
+        rotateSync();
+    </script>
+</body></html>

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
-import { GamePhase, GameMode, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty } from './types';
+import { GamePhase, GameMode, Player, WordEntry, RoundState, RankEntry, S2C, GameSnapshot, GameOverResult, Difficulty, StackState, StackPiece, StackPieceKind, StackAction } from './types';
 import { getRandomRounds, getMixedQueue, getCategoryCounts, DIFFICULTIES, DIFFICULTY_LABEL } from './wordBank';
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
@@ -42,6 +42,65 @@ const RELAJO_GAP_BETWEEN     = 1;  // pausa entre siluetas (el clásico usa 4)
 // resuelto por el coordinador), NO del tiempo ni de la latencia de red del celular.
 //   puntos = POINTS_BASE + (POINTS_TOP - POINTS_BASE) * (1 - (posición - 1) / N)
 // con N = total de aciertos de la ronda. Primero (pos=1) → POINTS_TOP.
+// ── SiluStack ────────────────────────────────────────────────────────────────
+// Tablero autoritativo replicado por eventos discretos. Cada silueta genera una
+// pieza; el primer acierto se convierte en piloto.
+const STACK_WIDTH = 10;
+const STACK_HEIGHT = 16;
+const STACK_QUEUE_SIZE = 40;
+const STACK_ROUND_SECONDS = 18;
+const STACK_GAP_BETWEEN = 1;
+const STACK_PIECES_PER_LEVEL = 5;
+const STACK_LINE_BONUS = 150;
+
+const STACK_KINDS: StackPieceKind[] = ['I', 'O', 'T', 'L', 'J', 'S', 'Z'];
+const STACK_COLORS: Record<StackPieceKind, number> = {
+  I: 1, O: 2, T: 3, L: 4, J: 5, S: 6, Z: 7,
+};
+const STACK_SHAPES: Record<StackPieceKind, Array<Array<[number, number]>>> = {
+  I: [
+    [[0, 1], [1, 1], [2, 1], [3, 1]],
+    [[2, 0], [2, 1], [2, 2], [2, 3]],
+    [[0, 2], [1, 2], [2, 2], [3, 2]],
+    [[1, 0], [1, 1], [1, 2], [1, 3]],
+  ],
+  O: [
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+  ],
+  T: [
+    [[1, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [1, 1], [2, 1], [1, 2]],
+    [[0, 1], [1, 1], [2, 1], [1, 2]],
+    [[1, 0], [0, 1], [1, 1], [1, 2]],
+  ],
+  L: [
+    [[2, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [1, 1], [1, 2], [2, 2]],
+    [[0, 1], [1, 1], [2, 1], [0, 2]],
+    [[0, 0], [1, 0], [1, 1], [1, 2]],
+  ],
+  J: [
+    [[0, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [1, 2]],
+    [[0, 1], [1, 1], [2, 1], [2, 2]],
+    [[1, 0], [1, 1], [0, 2], [1, 2]],
+  ],
+  S: [
+    [[1, 0], [2, 0], [0, 1], [1, 1]],
+    [[1, 0], [1, 1], [2, 1], [2, 2]],
+    [[1, 1], [2, 1], [0, 2], [1, 2]],
+    [[0, 0], [0, 1], [1, 1], [1, 2]],
+  ],
+  Z: [
+    [[0, 0], [1, 0], [1, 1], [2, 1]],
+    [[2, 0], [1, 1], [2, 1], [1, 2]],
+    [[0, 1], [1, 1], [1, 2], [2, 2]],
+    [[1, 0], [0, 1], [1, 1], [0, 2]],
+  ],
+};
 const POINTS_TOP  = 1000; // puntos del primero en orden lógico
 const POINTS_BASE = 100;  // base garantizada (el último en orden lógico tiende a esto)
 const HINT_UNLOCK_AFTER = 5;
@@ -66,7 +125,8 @@ export class Game extends EventEmitter {
   // Modo de juego y estado propio del modo Relajo.
   private mode: GameMode = 'clasico';
   private sharedClock = 0;   // segundos que le quedan de vida a la partida
-  private cleared = 0;       // siluetas despejadas por el grupo
+  private cleared = 0;
+  private stack?: StackState;       // tablero compartido de SiluStack
 
   // Votación de categoría (fase 'voting'): un jugador puede cambiar su voto
   // mientras dure la ventana, por eso es un mapa (no un contador directo).
@@ -114,15 +174,44 @@ export class Game extends EventEmitter {
     if (!this.round || this.phase !== 'playing') return null;
     return {
       roundNumber: this.currentRoundIndex + 1,
-      totalRounds: this.rounds.length,
+      totalRounds: this.mode === 'silustack' ? (this.stack?.pieces ?? 0) + 1 : this.rounds.length,
       category:    this.round.wordEntry.category,
       svg:         this.round.wordEntry.svg,
+      image:       this.round.wordEntry.image,
       hiddenWord:  this.round.hiddenWord.join(' '),
       timeLeft:    this.round.timeLeft,
       totalTime:   this.round.totalTime,
     };
   }
 
+  stackState(): StackState | null {
+    // Guarda de modo, igual que sharedClockState(): sin esto un tablero viejo
+    // se filtraba a las partidas Clásica/Relajo (server.ts lo empuja a todo el
+    // que se une o recarga), y el cliente se quedaba pintando "SiluStack" el
+    // resto de la partida.
+    if (this.mode !== 'silustack') return null;
+    // Tampoco se manda un tablero MUERTO: entre partidas el modo sigue siendo
+    // 'silustack' hasta que arranque la siguiente, así que sin este chequeo
+    // quien se une (o recarga) en el lobby recibe el tablero de la partida ya
+    // terminada y su pantalla se queda en SiluStack.
+    if (this.phase === 'waiting' || this.phase === 'gameEnd') return null;
+    return this.cloneStackState();
+  }
+
+  private cloneStackState(): StackState | null {
+    if (!this.stack) return null;
+    return {
+      ...this.stack,
+      board: this.stack.board.map(row => [...row]),
+      active: this.stack.active ? { ...this.stack.active } : null,
+      activeCells: this.stack.activeCells.map(cell => [cell[0], cell[1]]),
+    };
+  }
+
+  private broadcastStackState(): void {
+    const state = this.cloneStackState();
+    if (state) this.broadcast({ type: 'STACK_STATE', state });
+  }
   // --- Replicación (Eje 3: réplica por nodo) ---
 
   /** Estado autoritativo completo, para enviar a los seguidores (N_REPLICATE). */
@@ -144,6 +233,7 @@ export class Game extends EventEmitter {
       mode:              this.mode,
       sharedClock:       this.sharedClock,
       cleared:           this.cleared,
+      stack:             this.cloneStackState(),
     };
   }
 
@@ -171,6 +261,12 @@ export class Game extends EventEmitter {
     this.mode              = s.mode ?? 'clasico';
     this.sharedClock       = s.sharedClock ?? 0;
     this.cleared           = s.cleared ?? 0;
+    this.stack             = s.stack ? {
+      ...s.stack,
+      board: s.stack.board.map(row => [...row]),
+      active: s.stack.active ? { ...s.stack.active } : null,
+      activeCells: (s.stack.activeCells ?? []).map(cell => [cell[0], cell[1]]),
+    } : undefined;
   }
 
   /**
@@ -229,6 +325,11 @@ export class Game extends EventEmitter {
             .map(hintedId => hintedId === previousId ? id : hintedId);
           this.round.solvers = this.round.solvers
             .map(solver => solver.id === previousId ? { ...solver, id } : solver);
+        }
+        if (this.stack?.pilotId === previousId) {
+          this.stack.pilotId = id;
+          this.stack.pilotNick = nick;
+          this.broadcastStackState();
         }
         this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
         return existing;
@@ -330,7 +431,8 @@ export class Game extends EventEmitter {
     if (this.countdownTimer) clearTimeout(this.countdownTimer);
     this.mode = mode;
 
-    // Relajo: sin temáticas ni dificultad que votar -> arranca de una.
+    // Los modos infinitos no necesitan votación: arrancan de inmediato.
+    if (mode === 'silustack') { this.beginSiluStack(); return true; }
     if (mode === 'relajo') { this.beginRelajo(); return true; }
 
     this.pendingTotalRounds = totalRounds;
@@ -415,6 +517,7 @@ export class Game extends EventEmitter {
 
   /** Arranca el modo Relajo: banco completo mezclado y reloj comunitario. */
   private beginRelajo() {
+    this.clearStackIfNotSiluStack();
     this.resetPlayersForNewGame();
     // Sin filtro de temática ni dificultad: las 160 palabras revueltas.
     this.rounds = getMixedQueue(RELAJO_QUEUE_SIZE, this.recentWords);
@@ -428,13 +531,39 @@ export class Game extends EventEmitter {
     this.nextRound();
   }
 
-  /** Pausa entre siluetas según el modo. */
+  /** Arranca SiluStack con tablero vacío y banco completo mezclado. */
+  private beginSiluStack() {
+    this.resetPlayersForNewGame();
+    this.rounds = getMixedQueue(STACK_QUEUE_SIZE, this.recentWords);
+    this.recentWords = [...this.recentWords, ...this.rounds.map(r => r.word)].slice(-RECENT_WORDS_MEMORY);
+    this.currentGameId = randomUUID();
+    this.pendingGameOverResult = undefined;
+    this.currentRoundIndex = -1;
+    this.sharedClock = 0;
+    this.cleared = 0;
+    this.stack = {
+      width: STACK_WIDTH,
+      height: STACK_HEIGHT,
+      board: Array.from({ length: STACK_HEIGHT }, () => Array(STACK_WIDTH).fill(0)),
+      active: null,
+      activeCells: [],
+      nextKind: this.randomStackKind(),
+      pieces: 0,
+      lines: 0,
+      combo: 0,
+      level: 1,
+      lastClear: 0,
+    };
+    this.nextRound();
+  }
   private gapBetweenRounds(): number {
+    if (this.mode === 'silustack') return STACK_GAP_BETWEEN;
     return this.mode === 'relajo' ? RELAJO_GAP_BETWEEN : GAP_BETWEEN;
   }
 
   /** Duración de una silueta según el modo. */
   private roundSeconds(): number {
+    if (this.mode === 'silustack') return STACK_ROUND_SECONDS;
     return this.mode === 'relajo' ? RELAJO_ROUND_SECONDS : TOTAL_TIME;
   }
 
@@ -464,7 +593,140 @@ export class Game extends EventEmitter {
     });
   }
 
-  /** Purga desconectados y pone a cero los puntajes. Común a los dos modos. */
+  private randomStackKind(): StackPieceKind {
+    return STACK_KINDS[Math.floor(Math.random() * STACK_KINDS.length)];
+  }
+
+  private pieceCells(piece: StackPiece): Array<[number, number]> {
+    const shape = STACK_SHAPES[piece.kind][piece.rotation % 4];
+    return shape.map(([x, y]) => [piece.x + x, piece.y + y]);
+  }
+
+  private syncActiveCells(): void {
+    if (!this.stack) return;
+    this.stack.activeCells = this.stack.active ? this.pieceCells(this.stack.active) : [];
+  }
+
+  private canPlace(piece: StackPiece): boolean {
+    if (!this.stack) return false;
+    return this.pieceCells(piece).every(([x, y]) =>
+      x >= 0 && x < this.stack!.width &&
+      y >= 0 && y < this.stack!.height &&
+      this.stack!.board[y][x] === 0
+    );
+  }
+
+  private spawnStackPiece(): boolean {
+    if (!this.stack) return false;
+    const kind = this.stack.nextKind;
+    const active: StackPiece = {
+      kind,
+      rotation: 0,
+      x: Math.floor((this.stack.width - 4) / 2),
+      y: 0,
+      color: STACK_COLORS[kind],
+    };
+    this.stack.nextKind = this.randomStackKind();
+    this.stack.active = active;
+    this.stack.pilotId = undefined;
+    this.stack.pilotNick = undefined;
+    this.stack.lastClear = 0;
+    this.syncActiveCells();
+
+    if (!this.canPlace(active)) {
+      this.stack.active = null;
+      this.stack.activeCells = [];
+      this.broadcastStackState();
+      this.endGame();
+      return false;
+    }
+    return true;
+  }
+
+  private tryStackMove(dx: number, dy: number, rotation?: number): boolean {
+    if (!this.stack?.active) return false;
+    const candidate: StackPiece = {
+      ...this.stack.active,
+      x: this.stack.active.x + dx,
+      y: this.stack.active.y + dy,
+      rotation: rotation ?? this.stack.active.rotation,
+    };
+    if (!this.canPlace(candidate)) return false;
+    this.stack.active = candidate;
+    this.syncActiveCells();
+    return true;
+  }
+
+  stackAction(playerId: string, action: StackAction): boolean {
+    if (this.mode !== 'silustack' || this.phase !== 'playing' || !this.stack?.active) return false;
+    if (this.stack.pilotId !== playerId) return false;
+
+    if (action === 'drop') {
+      this.hardDropStackPiece();
+      return true;
+    }
+
+    let moved = false;
+    if (action === 'left') moved = this.tryStackMove(-1, 0);
+    if (action === 'right') moved = this.tryStackMove(1, 0);
+    if (action === 'down') moved = this.tryStackMove(0, 1);
+    if (action === 'rotate') {
+      const nextRotation = (this.stack.active.rotation + 1) % 4;
+      for (const kick of [0, -1, 1, -2, 2]) {
+        if (this.tryStackMove(kick, 0, nextRotation)) {
+          moved = true;
+          break;
+        }
+      }
+    }
+    if (moved) this.broadcastStackState();
+    return moved;
+  }
+
+  /** La pantalla maestra puede actuar como cabina, pero nunca saltarse al piloto. */
+
+  private hardDropStackPiece(): void {
+    if (!this.stack?.active) return;
+    while (this.tryStackMove(0, 1)) {
+      // La caída es autoritativa y se difunde una sola vez al bloquear la pieza.
+    }
+    this.lockStackPiece();
+  }
+
+  private lockStackPiece(): void {
+    if (!this.stack?.active || !this.round) return;
+    const value = this.stack.pilotId ? this.stack.active.color : 8;
+    for (const [x, y] of this.pieceCells(this.stack.active)) {
+      this.stack.board[y][x] = value;
+    }
+
+    const remaining = this.stack.board.filter(row => row.some(cell => cell === 0));
+    const clearedNow = this.stack.height - remaining.length;
+    const emptyRows = Array.from({ length: clearedNow }, () => Array(this.stack!.width).fill(0));
+    this.stack.board = [...emptyRows, ...remaining];
+    this.stack.pieces++;
+    this.stack.lines += clearedNow;
+    this.stack.combo = clearedNow > 0 ? this.stack.combo + 1 : 0;
+    this.stack.level = 1 + Math.floor(this.stack.pieces / STACK_PIECES_PER_LEVEL);
+    this.stack.lastClear = clearedNow;
+
+    if (clearedNow > 0 && this.stack.pilotId) {
+      const pilot = this.players.get(this.stack.pilotId);
+      if (pilot) pilot.score += clearedNow * STACK_LINE_BONUS * this.stack.combo;
+    }
+
+    this.stack.active = null;
+    this.stack.activeCells = [];
+    this.stack.pilotId = undefined;
+    this.stack.pilotNick = undefined;
+    this.broadcastStackState();
+    this.endRound();
+  }
+  /** Suelta el tablero de SiluStack: una partida de otro modo no debe heredarlo. */
+  private clearStackIfNotSiluStack() {
+    if (this.mode !== 'silustack') this.stack = undefined;
+  }
+
   private resetPlayersForNewGame() {
     for (const [id, p] of [...this.players]) {
       if (p.connected === false) this.players.delete(id);
@@ -473,6 +735,7 @@ export class Game extends EventEmitter {
   }
 
   private beginRounds(totalRounds: number, categories: string[], difficulty: Difficulty) {
+    this.clearStackIfNotSiluStack();
     // Purga a quien se quedó desconectado de la partida anterior sin volver:
     // una partida nueva es el corte natural de la ventana de reconexión.
     this.resetPlayersForNewGame();
@@ -491,7 +754,7 @@ export class Game extends EventEmitter {
     this.currentRoundIndex++;
     if (this.currentRoundIndex >= this.rounds.length) {
       // Relajo no termina por quedarse sin siluetas: solo el reloj lo mata.
-      if (this.mode === 'relajo') {
+      if (this.mode === 'relajo' || this.mode === 'silustack') {
         this.rounds = getMixedQueue(RELAJO_QUEUE_SIZE, this.recentWords);
         this.recentWords = [...this.recentWords, ...this.rounds.map(r => r.word)].slice(-RECENT_WORDS_MEMORY);
         this.currentRoundIndex = 0;
@@ -522,6 +785,15 @@ export class Game extends EventEmitter {
     };
     this.phase = 'countdown';
 
+    // SiluStack: la pieza se genera ANTES del ROUND_PREVIEW. Si el tablero ya
+    // está lleno, spawnStackPiece() termina la partida y aquí se corta: así
+    // nunca se emite el preview que abre el overlay de cuenta regresiva. Al
+    // revés (que era como estaba) el overlay quedaba tapando el podio final,
+    // porque solo ROUND_START lo cierra y ese ya no llega.
+    if (this.mode === 'silustack') {
+      if (!this.spawnStackPiece()) return;
+    }
+
     // Se conoce la ronda (categoría/silueta/palabra) pero el timer real
     // todavía no arranca: los clientes pintan la pantalla y esperan la
     // cuenta regresiva. Eje 1: es un broadcast más, todos la ven a la vez.
@@ -531,13 +803,14 @@ export class Game extends EventEmitter {
       totalRounds: this.rounds.length,
       category:    entry.category,
       svg:         entry.svg,
+      image:       entry.image,
       hiddenWord:  this.round.hiddenWord.join(' '),
     });
 
-    // Relajo va al ritmo del reloj comunitario: la cuenta regresiva completa
-    // solo tiene sentido al arrancar. Entre siluetas se entra directo, si no
-    // se pierden ~7s de los 45 en cada cambio.
-    if (this.mode === 'relajo' && this.cleared + this.currentRoundIndex > 0) {
+    if (this.mode === 'silustack') this.broadcastStackState();
+
+    if ((this.mode === 'relajo' && this.cleared + this.currentRoundIndex > 0)
+        || (this.mode === 'silustack' && (this.stack?.pieces ?? 0) > 0)) {
       this.startRoundTimer();
     } else {
       this.runCountdown(COUNTDOWN_FROM);
@@ -564,10 +837,12 @@ export class Game extends EventEmitter {
       totalRounds: this.rounds.length,
       category:    this.round.wordEntry.category,
       svg:         this.round.wordEntry.svg,
+      image:       this.round.wordEntry.image,
       hiddenWord:  this.round.hiddenWord.join(' '),
       timeLeft:    this.round.timeLeft,
       totalTime:   this.round.totalTime,
     });
+    if (this.mode === 'silustack') this.broadcastStackState();
     this.timer = setInterval(() => this.tick(), 1000);
   }
 
@@ -600,6 +875,36 @@ export class Game extends EventEmitter {
       timeLeft:   this.round.timeLeft,
       hiddenWord: this.round.hiddenWord.join(' '),
     });
+
+    if (this.mode === 'silustack') {
+      // El fin de ronda se evalúa ANTES de exigir pieza activa. Si no, un tick
+      // sin pieza (p.ej. tras un failover de Bully, donde el nuevo coordinador
+      // reanuda desde un snapshot tomado con active=null) devolvía para siempre
+      // y la partida quedaba congelada: timeLeft bajando a negativo, sin cerrar
+      // ronda ni generar pieza nueva.
+      if (!this.stack?.active) {
+        // Sin pieza activa no hay nada que hacer caer, pero la ronda SÍ tiene
+        // que poder cerrarse: antes se retornaba sin mirar el tiempo y la
+        // partida quedaba congelada para siempre (timeLeft a negativo, sin
+        // cerrar ronda ni generar pieza). Es alcanzable tras un failover de
+        // Bully, si el snapshot se tomó con active=null.
+        if (this.round.timeLeft <= 0) this.endRound();
+        return;
+      }
+      // Con pieza activa el fin de tiempo la hace caer de golpe, no cierra la
+      // ronda a secas: si no, la pieza nunca se fija en el tablero.
+      if (this.round.timeLeft <= 0) {
+        this.hardDropStackPiece();
+        return;
+      }
+      const elapsed = this.round.totalTime - this.round.timeLeft;
+      const cadence = Math.max(1, 3 - Math.floor((this.stack.level - 1) / 3));
+      if (elapsed > 0 && elapsed % cadence === 0) {
+        if (this.tryStackMove(0, 1)) this.broadcastStackState();
+        else this.lockStackPiece();
+      }
+      return;
+    }
 
     if (this.round.timeLeft <= 0) this.endRound();
   }
@@ -678,6 +983,11 @@ export class Game extends EventEmitter {
         }
 
         // Eje 1: difusión WS; Eje 2: incluir timestamp Lamport para ver el orden lógico
+        if (this.mode === 'silustack' && position === 1 && this.stack?.active) {
+          this.stack.pilotId = id;
+          this.stack.pilotNick = player.nick;
+          this.broadcastStackState();
+        }
         this.broadcast({
           type: 'CORRECT_ANSWER',
           nick: player.nick,
@@ -710,6 +1020,8 @@ export class Game extends EventEmitter {
     if (this.mode === 'relajo' && N > 0) {
       this.cleared++;
       this.broadcastSharedClock();
+    } else if (this.mode === 'silustack' && N > 0) {
+      this.cleared++;
     }
 
     const solvers = ordered.map((s, i) => {
@@ -731,7 +1043,12 @@ export class Game extends EventEmitter {
     });
 
     this.clock.tick(); // evento interno: fin de ronda
-    this.broadcast({ type: 'ROUND_END', word: this.round.wordEntry.word, solvers });
+    this.broadcast({
+      type:   'ROUND_END',
+      word:   this.round.wordEntry.word,
+      reveal: this.round.wordEntry.reveal, // el objeto a color, ya sin spoiler
+      solvers,
+    });
     this.broadcastRanking(false);
 
     setTimeout(() => this.nextRound(), this.gapBetweenRounds() * 1000);
@@ -745,8 +1062,9 @@ export class Game extends EventEmitter {
     // Revela la palabra que quedó a medias antes de mostrar el marcador final.
     if (this.round) {
       this.broadcast({
-        type: 'ROUND_END',
-        word: this.round.wordEntry.word,
+        type:   'ROUND_END',
+        word:   this.round.wordEntry.word,
+        reveal: this.round.wordEntry.reveal,
         solvers: [],
       });
     }
@@ -771,7 +1089,7 @@ export class Game extends EventEmitter {
       }));
     const result: GameOverResult = {
       gameId: this.currentGameId ?? randomUUID(),
-      totalRounds: this.rounds.length,
+      totalRounds: this.mode === 'silustack' ? (this.stack?.pieces ?? 0) : this.rounds.length,
       standings,
     };
     // Se asigna ANTES del broadcast final: ese broadcast dispara N_REPLICATE,

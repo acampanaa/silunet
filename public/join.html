@@ -195,6 +195,32 @@
       margin-top: 14px;
       min-height: 20px;
     }
+    .institution-signature {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      margin-top: 12px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(185, 200, 229, 0.13);
+      color: #b9c8e5;
+      text-align: left;
+    }
+    .institution-signature img {
+      display: block;
+      width: 45px;
+      height: auto;
+      flex-shrink: 0;
+      filter: drop-shadow(0 3px 8px rgba(0, 86, 166, 0.2));
+    }
+    .institution-signature span {
+      max-width: 118px;
+      font-size: 0.66rem;
+      font-weight: 650;
+      line-height: 1.35;
+      letter-spacing: 0.035em;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -216,6 +242,11 @@
 
     <button onclick="join()">Unirse a la partida</button>
     <p class="err" id="err"></p>
+
+    <div class="institution-signature">
+      <img src="/assets/puce-manabi-logo-transparent.png" alt="PUCE Manabí" width="287" height="367">
+      <span>Ingeniería de Software</span>
+    </div>
   </div>
 
   <script src="/avatars.js"></script>

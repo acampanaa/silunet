@@ -1,0 +1,123 @@
+pipeline {
+  agent any
+
+  tools {
+    nodejs 'nodejs'
+  }
+
+  triggers {
+    githubPush()
+    pollSCM('H/2 * * * *')
+  }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    skipDefaultCheckout(true)
+    buildDiscarder(logRotator(numToKeepStr: '15'))
+  }
+
+  parameters {
+    booleanParam(
+      name: 'RUN_SELENIUM',
+      defaultValue: true,
+      description: 'Ejecutar las pruebas Selenium en modo headless.'
+    )
+  }
+
+  environment {
+    SONARQUBE_SERVER = 'sonarqube'
+    SONAR_SCANNER = 'sonar'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Verificar herramientas') {
+      steps {
+        sh 'node --version'
+        sh 'npm --version'
+        sh 'java -version'
+        sh 'chmod +x mvnw'
+        script {
+          if (params.RUN_SELENIUM) {
+            sh 'chromium --version || google-chrome --version'
+            sh 'chromedriver --version || true'
+          }
+        }
+      }
+    }
+
+    stage('Instalar dependencias') {
+      steps {
+        sh 'npm ci'
+      }
+    }
+
+    stage('Compilar') {
+      steps {
+        sh 'npm run build'
+      }
+    }
+
+    stage('Pruebas unitarias y cobertura') {
+      steps {
+        sh 'npm run test:unit'
+      }
+    }
+
+    stage('Pruebas JUnit') {
+      steps {
+        sh 'npm run test:junit'
+      }
+    }
+
+    stage('Pruebas Selenium') {
+      when {
+        expression { params.RUN_SELENIUM }
+      }
+      steps {
+        sh 'npm run test:selenium'
+      }
+    }
+
+    stage('Analisis SonarQube') {
+      steps {
+        script {
+          def scannerHome = tool(
+            name: env.SONAR_SCANNER,
+            type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+          )
+          withSonarQubeEnv(env.SONARQUBE_SERVER) {
+            sh "${scannerHome}/bin/sonar-scanner"
+          }
+        }
+      }
+    }
+
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 10, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      junit(
+        allowEmptyResults: true,
+        testResults: 'reports/unit/junit.xml,target/surefire-reports/*.xml,reports/selenium/*.xml'
+      )
+      archiveArtifacts(
+        allowEmptyArchive: true,
+        artifacts: 'coverage/**,reports/unit/**,reports/junit/**,reports/selenium/**'
+      )
+    }
+  }
+}

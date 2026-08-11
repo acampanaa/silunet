@@ -5,3 +5,12 @@ data/
 *.db
 *.db-journal
 *.db-wal
+
+reports/selenium/*
+!reports/selenium/.gitkeep
+reports/unit/*
+!reports/unit/.gitkeep
+coverage/
+target/
+reports/junit/*
+!reports/junit/.gitkeep

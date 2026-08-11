@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>edu.puce.manabi</groupId>
+  <artifactId>silunet-junit</artifactId>
+  <version>1.0.0</version>
+  <name>Silunet - pruebas JUnit de caja negra</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+    <junit.version>5.12.2</junit.version>
+    <selenium.version>4.47.0</selenium.version>
+    <!-- Se puede apagar para ver el navegador: -DseleniumHeadless=false -->
+    <seleniumHeadless>true</seleniumHeadless>
+    <!-- Que etiquetas JUnit corre Surefire. Por defecto todo MENOS selenium;
+         el perfil -Pselenium invierte las dos. Van por propiedad y no por
+         <configuration> del perfil porque Maven fusiona la config del plugin
+         en vez de reemplazarla, y groups+excludedGroups a la vez da 0 pruebas. -->
+    <gruposIncluidos></gruposIncluidos>
+    <gruposExcluidos>selenium</gruposExcluidos>
+    <carpetaReportes>${project.build.directory}/surefire-reports</carpetaReportes>
+  </properties>
+
+  <!-- Silunet no contiene producción Java. Esta fuente JUnit comprueba el
+       servidor Node real y genera XML Surefire consumible por Jenkins. -->
+  <build>
+    <testSourceDirectory>${project.basedir}/test/junit</testSourceDirectory>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+      </plugin>
+      <!-- Las pruebas Selenium viven en test/selenium/, aparte de las de caja
+           negra. Maven solo admite un testSourceDirectory, asi que la segunda
+           carpeta se agrega con build-helper. -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <id>agregar-pruebas-selenium</id>
+            <phase>generate-test-sources</phase>
+            <goals><goal>add-test-source</goal></goals>
+            <configuration>
+              <sources><source>${project.basedir}/test/selenium</source></sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.3</version>
+        <configuration>
+          <useModulePath>false</useModulePath>
+          <reportsDirectory>${carpetaReportes}</reportsDirectory>
+          <!-- Por defecto 'mvn test' NO abre navegadores: las pruebas Selenium
+               tardan y necesitan Chrome. Se piden aparte con -Pselenium. -->
+          <groups>${gruposIncluidos}</groups>
+          <excludedGroups>${gruposExcluidos}</excludedGroups>
+          <systemPropertyVariables>
+            <seleniumHeadless>${seleniumHeadless}</seleniumHeadless>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- mvn test -Pselenium  ->  corre SOLO las pruebas de navegador -->
+    <profile>
+      <id>selenium</id>
+      <properties>
+        <gruposIncluidos>selenium</gruposIncluidos>
+        <gruposExcluidos></gruposExcluidos>
+        <carpetaReportes>${project.basedir}/reports/selenium</carpetaReportes>
+      </properties>
+    </profile>
+  </profiles>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Selenium 4 trae Selenium Manager: descarga solo el chromedriver que
+         corresponde al Chrome instalado. No hay que instalar drivers a mano. -->
+    <dependency>
+      <groupId>org.seleniumhq.selenium</groupId>
+      <artifactId>selenium-java</artifactId>
+      <version>${selenium.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

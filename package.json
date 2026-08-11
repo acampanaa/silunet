@@ -6,6 +6,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsc && node dist/server.js",
+    "pretest:unit": "node -e \"require('node:fs').mkdirSync('reports/unit',{recursive:true})\"",
     "test:unit": "c8 --all --include=src/lamport.ts --include=src/mutex.ts --include=src/wordBank.ts --check-coverage --lines=90 --statements=90 --functions=90 --branches=85 --reporter=text --reporter=html --reporter=lcov --reporter=json-summary --reports-dir=coverage tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/unit/junit.xml test/unit/SilunetTest.ts",
     "test:junit": "npm run build && node scripts/run-maven.js test",
     "test:selenium": "npm run build && node scripts/run-maven.js test -Pselenium",

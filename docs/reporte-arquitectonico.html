@@ -74,99 +74,100 @@
   <!-- ───────────────────────── 1. ARQUITECTURA ───────────────────────── -->
   <section>
     <h2>1. Arquitectura de la red local del stand</h2>
-    <p class="lead">Topología Wi-Fi sin salida a internet: clúster de 3 nodos simétricos
-      (Node.js + <code>ws</code>), pantalla maestra de solo lectura y los celulares del público.</p>
+    <p class="lead">Topología Wi-Fi sin salida a internet: una laptop entrega la aplicación,
+      inicia el juego y señaliza una malla WebRTC completa entre hasta cinco jugadores. Cada
+      navegador conserva el snapshot y los recursos necesarios para continuar Clásico sin el host.</p>
     <div class="card">
       <pre class="mermaid">
 flowchart TB
-    R{{"Router Wi-Fi local&#10;(sin salida a internet)"}}
-
-    subgraph PUB["Público de la feria — celulares"]
-        direction LR
-        C1["Celular A&#10;/join entonces /play"]
-        C2["Celular B&#10;/join entonces /play"]
-        C3["Celular C&#10;/join entonces /play"]
+    subgraph LAN["LAN cerrada del stand · router/AP propio"]
+        H["Laptop host&#10;Node.js + HTTP/WebSocket&#10;juego inicial y señalización"]
+        M["/master&#10;observador P2P no elegible"]
+        subgraph MESH["Malla WebRTC completa · 2 a 5 jugadores"]
+            direction LR
+            A["Jugador A&#10;réplica + recursos cacheados"]
+            B["Jugador B&#10;réplica + recursos cacheados"]
+            C["Jugadores C…E&#10;réplica + recursos cacheados"]
+        end
     end
 
-    MA["Pantalla Maestra&#10;/master (solo lectura)&#10;silueta + ranking + salud del clúster"]
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| M
+    H -->|"Bootstrap + señalización"| A
+    H -->|"Bootstrap + señalización"| B
+    H -->|"Bootstrap + señalización"| C
+    A <-->|"WebRTC DataChannel"| B
+    B <-->|"WebRTC DataChannel"| C
+    A <-->|"WebRTC DataChannel"| C
+    M <-.->|"WebRTC · solo observa"| A
+    M <-.->|"WebRTC · solo observa"| B
 
-    subgraph CL["Clúster de 3 nodos simétricos · estado replicado en memoria"]
-        direction LR
-        N1["Nodo 1 ★ COORDINADOR&#10;estado maestro de la ronda"]
-        N2["Nodo 2 · réplica pasiva"]
-        N3["Nodo 3 · réplica pasiva"]
-    end
+    DB[("PostgreSQL / SQLite&#10;solo historia cerrada")]
+    H -.->|"fuera del camino crítico"| DB
+    A & B & C -.-> E["Caída del host&#10;elección Bully entre jugadores"]
+    E --> L["Nuevo líder ejecuta Clásico&#10;desde el snapshot local"]
+    L --> O["GAME + STATE por DataChannel&#10;sin HTTP ni base de datos"]
 
-    C1 -- "WebSocket" --> R
-    C2 -- "WebSocket" --> R
-    C3 -- "WebSocket" --> R
-    MA -- "WebSocket" --> R
-    R --- N1
-    R --- N2
-    R --- N3
-    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N2
-    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N3
-    N2 <== "heartbeats · elección Bully" ==> N3
-
-    classDef coord fill:#7c3aed22,stroke:#fbbf24,stroke-width:2px,color:#fff;
-    classDef rep   fill:#15152a,stroke:#2a4a8a,color:#cdd9f5;
-    classDef cli   fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
-    class N1 coord;
-    class N2,N3 rep;
-    class C1,C2,C3,MA cli;
+    classDef host fill:#7c3aed,stroke:#a78bfa,color:#fff;
+    classDef peer fill:#15152a,stroke:#06b6d4,color:#e8f4ff;
+    classDef support fill:#15152a,stroke:#64748b,color:#cbd5e1;
+    classDef fail fill:#052e2b,stroke:#10b981,color:#d1fae5;
+    class H host;
+    class A,B,C peer;
+    class M,DB support;
+    class E,L,O fail;
       </pre>
     </div>
-    <p class="note">Los celulares y la pantalla maestra pueden conectarse al <code>/join</code> o
-      <code>/master</code> de <em>cualquier</em> nodo: todos comparten el mismo estado replicado.</p>
+    <p class="note">PostgreSQL o SQLite guardan únicamente historia cerrada. La continuidad
+      P2P no llama HTTP ni consulta la base: usa DataChannels, snapshots y recursos cacheados
+      dentro de cada navegador.</p>
   </section>
 
-  <!-- ───────────────────── 2. SECUENCIA — CARRERA CONCURRENTE ───────────────────── -->
+  <!-- ───────────────────── 2. SECUENCIA — CONTINUIDAD P2P ───────────────────── -->
   <section>
-    <h2>2. Ciclo de vida de un acierto concurrente <span class="eje">— Eje 2 (Lamport) + Eje 3 (exclusión mutua)</span></h2>
-    <p class="lead">Dos jugadores en nodos distintos aciertan casi en el mismo milisegundo.
-      El candado FIFO del coordinador <strong>serializa</strong> el acceso al marcador y el reloj de
-      Lamport decide la posición. Quien "pierde la carrera" igual gana, pero en posición #2
-      (menos puntos); un segundo intento del mismo jugador se <strong>rechaza</strong>.</p>
+    <h2>2. Caída del host y continuidad del juego <span class="eje">— Eje 4 (tolerancia a fallos)</span></h2>
+    <p class="lead">Mientras la laptop está disponible entrega snapshots y señaliza la malla.
+      Si desaparece, los jugadores detectan la pérdida, acuerdan por mayoría activar el failover
+      y aplican una elección Bully: gana el navegador jugador con el identificador P2P mayor.</p>
     <div class="card">
       <pre class="mermaid">
 sequenceDiagram
     autonumber
-    participant A as Jugador A (Nodo 2)
-    participant B as Jugador B (Nodo 3)
-    participant N as Nodos 2 y 3 (seguidores)
-    participant CO as Nodo 1 ★ Coordinador
-    participant MA as Pantalla Maestra
+    participant H as Laptop host (Node + /master)
+    participant A as Jugador A (navegador)
+    participant B as Jugador B (ID P2P mayor)
 
-    Note over A,B: Ambos envían el intento correcto casi al mismo tiempo
-    A->>N: GUESS "MONITOR" (L_cliente=7)
-    B->>N: GUESS "MONITOR" (L_cliente=9)
-    N->>CO: N_FORWARD_GUESS A (lamport=7)
-    N->>CO: N_FORWARD_GUESS B (lamport=9)
+    H-->>A: P2P_PEERS + P2P_SNAPSHOT
+    H-->>B: P2P_PEERS + P2P_SNAPSHOT
+    A->>H: GET siluetas y revelaciones de la partida
+    B->>H: GET siluetas y revelaciones de la partida
+    H-->>A: recursos → caché local como data URL
+    H-->>B: recursos → caché local como data URL
+    A<<->>B: WebRTC DataChannel abierto
 
-    rect rgb(40,30,70)
-    Note over CO: scoreboardLock.runExclusive() — sección crítica (Eje 3)
-    CO->>CO: A toma el candado · L=max(L,7)+1=21 · solver #1
-    CO-->>MA: CORRECT_ANSWER A · pos #1 · L=21
-    Note over CO: B estaba ENCOLADO (FIFO) hasta liberar el candado
-    CO->>CO: B entra · L=max(21,9)+1=22 · solver #2
-    CO-->>MA: CORRECT_ANSWER B · pos #2 · L=22
-    end
+    Note over H: Se apaga o pierde la red
+    Note over A,B: WebSocket cerrado o sin actividad del host por más de 3,2 s
+    A-->>B: HEARTBEAT · serverAlive=false
+    B-->>A: HEARTBEAT · serverAlive=false
+    Note over A,B: Tras 1,2 s de gracia y mayoría, ambos calculan el mismo líder
+    A->>A: electedLeader() = B
+    B->>B: electedLeader() = B
+    B-->>A: LEADER B
+    B->>B: startEngine(snapshot replicado)
 
-    Note over A,CO: Rama de RECHAZO — si A reintenta tras haber acertado
-    A->>N: GUESS "MONITOR" (otra vez)
-    N->>CO: N_FORWARD_GUESS A
-    CO-->>A: ALREADY_SOLVED  (intento rechazado)
-
-    Note over CO,MA: ROUND_END — orden por Lamport: #1 A = 1000 pts · #2 B = 700 pts
+    A->>B: ACTION · GUESS ROUTER (Lamport)
+    B->>B: valida, ordena y actualiza el marcador
+    B-->>A: GAME · CORRECT_ANSWER / TICK / ROUND_END
+    B-->>A: STATE · snapshot convergente
+    Note over A,B: Clásico sigue sin HTTP y usa recursos cacheados<br/>Rondas: 25, 22, 19… hasta un mínimo de 5 s
       </pre>
     </div>
   </section>
 
   <!-- ─────────────────── 3. ANÁLISIS BAJO CONCURRENCIA ─────────────────── -->
   <section>
-    <h2>3. Comportamiento del servidor bajo concurrencia simulada <span class="eje">— Eje 3</span></h2>
+    <h2>3. Comportamiento del motor bajo concurrencia simulada <span class="eje">— Ejes 2 y 3</span></h2>
     <p class="lead">Cuatro aciertos llegan casi simultáneamente con relojes de cliente
-      desordenados. El candado FIFO los <strong>embudo­na y procesa de a uno</strong>; el coordinador
+      desordenados. El candado FIFO los <strong>embuda y procesa de a uno</strong>; el motor
       asigna a cada uno un Lamport creciente que fija su posición y puntaje. Sin entrelazado,
       sin puntajes perdidos ni duplicados.</p>
     <div class="card">
@@ -179,19 +180,21 @@ flowchart LR
         b3["Bot3 · L_cli=4"]
         b4["Bot4 · L_cli=2"]
     end
-    LOCK{{"Candado FIFO&#10;recurso: marcador&#10;(serializa el acceso)"}}
+    LOCK["Mutex FIFO · runExclusive()&#10;el motor asigna Lamport creciente"]
     b1 --> LOCK
     b2 --> LOCK
     b3 --> LOCK
     b4 --> LOCK
     LOCK ==> s1["#1 · L=21 · 1000 pts"]
-    s1  ==> s2["#2 · L=22 · 700 pts"]
-    s2  ==> s3["#3 · L=23 · 400 pts"]
-    s3  ==> s4["#4 · L=24 · 100 pts"]
+    s1  ==> s2["#2 · L=22 · 775 pts"]
+    s2  ==> s3["#3 · L=23 · 550 pts"]
+    s3  ==> s4["#4 · L=24 · 325 pts"]
+    FORMULA["puntos = 100 + 900 ×&#10;(1 − (posición − 1) / N)"]
+    s4 -.-> FORMULA
 
     classDef ok fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
     classDef res fill:#7c3aed22,stroke:#7c3aed,color:#fff;
-    class b1,b2,b3,b4 ok;
+    class b1,b2,b3,b4,LOCK ok;
     class s1,s2,s3,s4 res;
       </pre>
     </div>
@@ -202,9 +205,9 @@ flowchart LR
       </thead>
       <tbody>
         <tr><td>1.º en tomar el token</td><td>L = 21</td><td class="win">#1</td><td class="win">1000 pts</td></tr>
-        <tr><td>2.º (encolado)</td><td>L = 22</td><td>#2</td><td>700 pts</td></tr>
-        <tr><td>3.º (encolado)</td><td>L = 23</td><td>#3</td><td>400 pts</td></tr>
-        <tr><td>4.º (encolado)</td><td>L = 24</td><td>#4</td><td>100 pts</td></tr>
+        <tr><td>2.º (encolado)</td><td>L = 22</td><td>#2</td><td>775 pts</td></tr>
+        <tr><td>3.º (encolado)</td><td>L = 23</td><td>#3</td><td>550 pts</td></tr>
+        <tr><td>4.º (encolado)</td><td>L = 24</td><td>#4</td><td>325 pts</td></tr>
       </tbody>
     </table>
 
@@ -214,13 +217,14 @@ flowchart LR
       <li><strong>Sin inanición:</strong> la cola es FIFO — el que llega primero al coordinador
         obtiene el token primero; nadie queda esperando indefinidamente.</li>
       <li><strong>Orden determinista e independiente de la latencia:</strong> la posición la fija el
-        Lamport del coordinador (<code>max(local, recibido)+1</code>), no el reloj físico del celular.</li>
+        Lamport del motor autoritativo (<code>max(local, recibido)+1</code>), no el reloj físico del celular.</li>
       <li><strong>Puntaje atado a la posición, no al tiempo:</strong> los puntos se calculan al cerrar
         la ronda con N ya conocido — el 1.º recibe 1000 y el último tiende a 100.</li>
-      <li><strong>Reproducible:</strong> <code>node scripts/sim-concurrencia.mjs ws://localhost:3001 4</code>
-        dispara los 4 aciertos y el log del servidor muestra <code>'marcador' ocupado → encolado</code>.</li>
+      <li><strong>Reproducible:</strong> <code>npm run vv:concurrencia</code> ejecuta la prueba
+        automática con siete bots y valida Lamport, puntaje, unicidad y ausencia de pérdidas.</li>
     </ul>
-    <p class="note">En el clúster de 3 nodos, los aciertos de seguidores llegan vía
+    <p class="note">El clúster Node de tres nodos se conserva como modo opcional de V&amp;V.
+      En ese escenario, los aciertos de seguidores llegan vía
       <code>N_FORWARD_GUESS</code> y atraviesan el mismo candado del coordinador: el comportamiento
       serializado es idéntico al mostrado.</p>
   </section>

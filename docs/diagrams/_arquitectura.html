@@ -8,36 +8,49 @@
 </style></head><body>
 <pre class="mermaid">
 flowchart TB
-    R{{"Router Wi-Fi local&#10;(sin salida a internet)"}}
-    subgraph PUB["Público de la feria — celulares"]
-        direction LR
-        C1["Celular A&#10;/join entonces /play"]
-        C2["Celular B&#10;/join entonces /play"]
-        C3["Celular C&#10;/join entonces /play"]
+    subgraph LAN["LAN cerrada del stand · router/AP propio"]
+        H["Laptop host<br/>Node.js + HTTP/WebSocket<br/>juego inicial y señalización"]
+        M["/master<br/>observador P2P no elegible"]
+
+        subgraph MESH["Malla WebRTC completa · 2 a 5 jugadores"]
+            direction LR
+            A["Jugador A<br/>réplica + recursos cacheados"]
+            B["Jugador B<br/>réplica + recursos cacheados"]
+            C["Jugadores C…E<br/>réplica + recursos cacheados"]
+        end
     end
-    MA["Pantalla Maestra&#10;/master (solo lectura)&#10;silueta + ranking + salud del clúster"]
-    subgraph CL["Clúster de 3 nodos simétricos · estado replicado en memoria"]
-        direction LR
-        N1["Nodo 1 ★ COORDINADOR&#10;estado maestro de la ronda"]
-        N2["Nodo 2 · réplica pasiva"]
-        N3["Nodo 3 · réplica pasiva"]
+    H -->|"HTTP + WebSocket inicial"| M
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| A
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| B
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| C
+
+    A <-->|"WebRTC DataChannel"| B
+    B <-->|"WebRTC DataChannel"| C
+    A <-->|"WebRTC DataChannel"| C
+    M <-.->|"WebRTC · solo observa"| A
+    M <-.->|"WebRTC · solo observa"| B
+    M <-.->|"WebRTC · solo observa"| C
+    DB[("PostgreSQL / SQLite<br/>solo historia cerrada")]
+    H -.->|"fuera del camino crítico"| DB
+
+    subgraph OFF["Si el host desaparece"]
+        E["Elección Bully entre jugadores<br/>gana el ID P2P mayor"]
+        L["Nuevo líder ejecuta Clásico<br/>desde el snapshot local"]
+        K["GAME + STATE por DataChannel<br/>sin HTTP ni base de datos"]
+        E --> L --> K
     end
-    C1 -- "WebSocket" --> R
-    C2 -- "WebSocket" --> R
-    C3 -- "WebSocket" --> R
-    MA -- "WebSocket" --> R
-    R --- N1
-    R --- N2
-    R --- N3
-    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N2
-    N1 <== "heartbeats · N_BROADCAST · N_REPLICATE" ==> N3
-    N2 <== "heartbeats · elección Bully" ==> N3
-    classDef coord fill:#7c3aed22,stroke:#fbbf24,stroke-width:2px,color:#fff;
-    classDef rep   fill:#15152a,stroke:#2a4a8a,color:#cdd9f5;
-    classDef cli   fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
-    class N1 coord;
-    class N2,N3 rep;
-    class C1,C2,C3,MA cli;
+
+    A -.-> E
+    B -.-> E
+    C -.-> E
+    classDef host fill:#7c3aed,stroke:#a78bfa,color:#fff;
+    classDef peer fill:#15152a,stroke:#06b6d4,color:#e8f4ff;
+    classDef support fill:#15152a,stroke:#64748b,color:#cbd5e1;
+    classDef fail fill:#052e2b,stroke:#10b981,color:#d1fae5;
+    class H host;
+    class A,B,C peer;
+    class M,DB support;
+    class E,L,K fail;
 </pre>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';

@@ -9,6 +9,9 @@ Diseñado para la feria "Casa Abierta": el público escanea un QR con su celular
 sin instalar nada, y una pantalla proyectada muestra el estado de la partida en vivo.
 
 > Este README documenta **el sistema tal como está construido**.
+>
+> Para estudiarlo desde cero y preparar la defensa de la caída del host, seguir la
+> **[ruta progresiva de conceptos](docs/conceptos/README.md)**.
 
 ---
 
@@ -150,90 +153,89 @@ snapshot del navegador, una concesión aceptada para priorizar disponibilidad en
 
 ```mermaid
 flowchart TB
-    subgraph LAN["LAN del stand · router/AP independiente"]
-        H["💻 Laptop host<br/>web + señalización + juego inicial"]
-        M["🖥️ /master<br/>réplica no elegible"]
-        C1["📱 Jugador A<br/>réplica P2P"]
-        C2["📱 Jugador B<br/>réplica P2P"]
-        C3["📱 Jugador C<br/>réplica P2P"]
+    subgraph LAN["LAN cerrada del stand · router/AP propio"]
+        H["💻 Laptop host<br/>Node.js + HTTP/WebSocket<br/>juego inicial y señalización"]
+        M["🖥️ /master<br/>observador P2P no elegible"]
+        C1["📱 Jugador A<br/>réplica + recursos cacheados"]
+        C2["📱 Jugador B<br/>réplica + recursos cacheados"]
+        C3["📱 Jugadores C…E<br/>réplica + recursos cacheados"]
     end
 
-    H -->|"HTTP + WebSocket inicial"| M
-    H -->|"HTTP + señalización"| C1
-    H -->|"HTTP + señalización"| C2
-    H -->|"HTTP + señalización"| C3
-    C1 <-->|WebRTC| C2
-    C2 <-->|WebRTC| C3
-    C1 <-->|WebRTC| C3
-    M <-.->|WebRTC observador| C1
-    M <-.->|WebRTC observador| C2
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| M
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| C1
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| C2
+    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| C3
+    C1 <-->|"WebRTC DataChannel"| C2
+    C2 <-->|"WebRTC DataChannel"| C3
+    C1 <-->|"WebRTC DataChannel"| C3
+    M <-.->|"WebRTC · solo observa"| C1
+    M <-.->|"WebRTC · solo observa"| C2
 
-    DB[("PostgreSQL / SQLite<br/>solo historia")]
-    H --> DB
+    DB[("PostgreSQL / SQLite<br/>solo historia cerrada")]
+    H -.->|"fuera del camino crítico"| DB
+
+    C1 & C2 & C3 -.-> E["Caída del host<br/>elección Bully entre jugadores"]
+    E --> L["Nuevo líder ejecuta Clásico<br/>desde el snapshot local"]
+    L --> O["GAME + STATE por DataChannel<br/>sin HTTP ni base de datos"]
 ```
 
 ### Dos aciertos concurrentes: Lamport + exclusión mutua
 
 ```mermaid
 sequenceDiagram
-    participant A as 📱 Ana (en node2)
-    participant B as 📱 Beto (en node3)
-    participant S2 as node2 (seguidor)
-    participant S3 as node3 (seguidor)
-    participant C as node1 (COORDINADOR)
+    participant A as 📱 Ana
+    participant B as 📱 Beto
+    participant H as 💻 Motor autoritativo del host
 
-    Note over A,B: Ambos escriben la palabra correcta "casi" a la vez
+    Note over A,B: Ambos envían la respuesta correcta casi a la vez
+    A->>H: GUESS "ROUTER" (L_cli=7)
+    B->>H: GUESS "ROUTER" (L_cli=5)
 
-    A->>S2: GUESS "ROUTER" (L=7)
-    B->>S3: GUESS "ROUTER" (L=5)
-    S2->>C: N_FORWARD_GUESS (L=7)
-    S3->>C: N_FORWARD_GUESS (L=5)
+    Note over H: Eje 3 · mutex FIFO del marcador
+    H->>H: 🔒 runExclusive(Ana)
+    H->>H: Eje 2 · L = max(local, 7) + 1 = 12
+    H->>H: registra a Ana en posición lógica #1
+    H->>H: 🔓 libera y atiende al siguiente
 
-    Note over C: Eje 3 — candado FIFO del marcador
-    C->>C: 🔒 adquiere candado (Ana)
-    C->>C: Eje 2 — L = max(local, 7) + 1 = 12
-    C->>C: registra acierto de Ana
-    C->>C: 🔓 libera → entrega al siguiente en cola
+    H->>H: 🔒 runExclusive(Beto)
+    H->>H: Eje 2 · L = max(12, 5) + 1 = 13
+    H->>H: registra a Beto en posición lógica #2
+    H->>H: 🔓 libera
 
-    C->>C: 🔒 adquiere candado (Beto)
-    C->>C: Eje 2 — L = max(12, 5) + 1 = 13
-    C->>C: registra acierto de Beto
-    C->>C: 🔓 libera
-
-    Note over C: Al cerrar la ronda: ordena por Lamport<br/>y reparte puntos por POSICIÓN
-    C-->>A: ROUND_END (Ana #1 → 1000 pts, L=12)
-    C-->>B: ROUND_END (Beto #2 → 100 pts, L=13)
+    Note over H: Al cerrar: puntos = 100 + 900 × (1 − (posición − 1) / N)
+    H-->>A: ROUND_END (Ana #1 → 1000 pts, L=12)
+    H-->>B: ROUND_END (Beto #2 → 550 pts, L=13)
 ```
 
-### Caída del coordinador: algoritmo del Matón (Bully)
+### Caída de la laptop host: continuidad P2P y algoritmo del Matón (Bully)
 
 ```mermaid
 sequenceDiagram
-    participant N1 as node1 (coordinador)
-    participant N2 as node2
-    participant N3 as node3
-    participant P as 📱 Celular en node1
+    participant H as 💻 Laptop host
+    participant A as 📱 Jugador A
+    participant B as 📱 Jugador B (ID P2P mayor)
+
+    H-->>A: P2P_SNAPSHOT + recursos de la partida
+    H-->>B: P2P_SNAPSHOT + recursos de la partida
+    A<<->>B: WebRTC DataChannel abierto
 
     loop cada 1000 ms
-        N1->>N2: N_HEARTBEAT
-        N1->>N3: N_HEARTBEAT
+        A-->>B: HEARTBEAT · serverAlive=true
+        B-->>A: HEARTBEAT · serverAlive=true
     end
 
-    Note over N1: 💀 el nodo cae
+    Note over H: 💀 se apaga o pierde la red
+    Note over A,B: WebSocket cerrado o sin host por más de 3,2 s
+    A-->>B: HEARTBEAT · serverAlive=false
+    B-->>A: HEARTBEAT · serverAlive=false
+    Note over A,B: tras 1,2 s de gracia y mayoría,<br/>ambos eligen el jugador con ID P2P mayor
+    B-->>A: LEADER B
+    B->>B: startEngine(snapshot local)
 
-    Note over N2,N3: sin heartbeat por más de 2500 ms
-    N2->>N3: N_ELECTION (soy node2)
-    N3-->>N2: N_ALIVE (yo soy mayor)
-    Note over N3: nadie mayor vivo → gana
-    N3->>N2: N_COORDINATOR (soy node3)
-
-    Note over N3: reanuda la partida desde su réplica<br/>y suelta a los jugadores fantasma de node1
-    N3-->>N2: N_REPLICATE (estado autoritativo)
-
-    Note over P: su WebSocket murió con node1
-    P->>N2: reconecta solo + mismo token
-    N2->>N3: N_FORWARD_JOIN (token)
-    N3-->>P: WELCOME (score restaurado, reconnected=true)
+    A->>B: ACTION · GUESS "ROUTER" (Lamport)
+    B-->>A: GAME · CORRECT_ANSWER / TICK / ROUND_END
+    B-->>A: STATE · snapshot convergente
+    Note over A,B: Clásico continúa sin HTTP ni PostgreSQL.<br/>Usa la caché local y rondas de 25, 22, 19… hasta 5 s.
 ```
 
 ### Modelo de datos
@@ -266,6 +268,13 @@ erDiagram
         INTEGER puntos
         INTEGER puesto "1 = ganó"
         TEXT    medalla "oro|plata|bronce|NULL"
+    }
+    CLUSTER_LEADER {
+        TEXT cluster_id PK "solo clúster Node opcional"
+        TEXT node_id
+        BIGINT term "fencing token"
+        TIMESTAMPTZ lease_until
+        TIMESTAMPTZ updated_at
     }
 ```
 
@@ -574,7 +583,7 @@ public/         cliente sin build: join.html, play.html, master.html, sounds.js
 vv/             bots de verificación y validación
 scripts/        arranque del host y utilidades del proyecto
 test/           pruebas unitarias, JUnit, Selenium y prueba de fuego P2P
-docs/           reporte, diagramas y capturas de evidencia
+docs/           conceptos, reporte, diagramas y capturas de evidencia
 BDD.sql         esquema de base de datos documentado
 compose.yaml    PostgreSQL local para desarrollo
 EJECUCION.md    guía de ejecución paso a paso

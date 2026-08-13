@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WordEntry, Difficulty } from './types';
+import { GENERATED_ART } from './generatedSilhouettes';
 
 // Siluetas SVG — todas usan fill="currentColor" para poder cambiar color vía CSS
 
@@ -255,6 +256,7 @@ const PLACEHOLDER = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/sv
  * a este mapa — no hay que tocar las listas de categorías de abajo.
  */
 const ART: Record<string, string> = {
+  ...GENERATED_ART,
   MONITOR, TECLADO, RATON, LAPTOP, IMPRESORA, PROYECTOR, PARLANTE, VENTILADOR,
   MEMORIA, JOYSTICK,
   ROUTER, SERVIDOR, NUBE, MODEM, ANTENA, SWITCH: SWITCH_ICON, SATELITE, CABLE,

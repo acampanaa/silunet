@@ -8,26 +8,30 @@
 </style></head><body>
 <pre class="mermaid">
 flowchart LR
-    subgraph IN["4 aciertos casi simultáneos (Lamport de cliente desordenado)"]
+    subgraph IN["4 aciertos casi simultáneos"]
         direction TB
-        b1["Bot1 · L_cli=3"]
-        b2["Bot2 · L_cli=1"]
-        b3["Bot3 · L_cli=4"]
-        b4["Bot4 · L_cli=2"]
+        b1["Bot 1 · L_cli=3"]
+        b2["Bot 2 · L_cli=1"]
+        b3["Bot 3 · L_cli=4"]
+        b4["Bot 4 · L_cli=2"]
     end
-    LOCK{{"Candado FIFO&#10;recurso: marcador&#10;(serializa el acceso)"}}
+    LOCK["Mutex FIFO · runExclusive()<br/>el motor asigna Lamport creciente"]
     b1 --> LOCK
     b2 --> LOCK
     b3 --> LOCK
     b4 --> LOCK
     LOCK ==> s1["#1 · L=21 · 1000 pts"]
-    s1  ==> s2["#2 · L=22 · 700 pts"]
-    s2  ==> s3["#3 · L=23 · 400 pts"]
-    s3  ==> s4["#4 · L=24 · 100 pts"]
+    s1  ==> s2["#2 · L=22 · 775 pts"]
+    s2  ==> s3["#3 · L=23 · 550 pts"]
+    s3  ==> s4["#4 · L=24 · 325 pts"]
+    FORMULA["puntos = 100 + 900 ×<br/>(1 − (posición − 1) / N)"]
+    s4 -.-> FORMULA
     classDef ok fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
-    classDef res fill:#7c3aed22,stroke:#7c3aed,color:#fff;
-    class b1,b2,b3,b4 ok;
+    classDef res fill:#2e1065,stroke:#8b5cf6,color:#fff;
+    classDef note fill:#052e2b,stroke:#10b981,color:#d1fae5;
+    class b1,b2,b3,b4,LOCK ok;
     class s1,s2,s3,s4 res;
+    class FORMULA note;
 </pre>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';

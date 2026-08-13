@@ -5,7 +5,9 @@ import { getRandomRounds, getMixedQueue, getCategoryCounts, DIFFICULTIES, DIFFIC
 import { LamportClock } from './lamport';
 import { Mutex } from './mutex';
 
-const TOTAL_TIME   = 24;  // segundos por ronda
+const CLASSIC_START_SECONDS = 25;
+const CLASSIC_MIN_SECONDS   = 5;
+const CLASSIC_STEP_SECONDS  = 3;
 const REVEAL_EVERY = 4;   // revelar una letra cada N segundos
 const GAP_BETWEEN  = 4;   // segundos entre rondas
 const COUNTDOWN_FROM = 3; // "3, 2, 1, ¡YA!" antes de que arranque el timer real
@@ -106,6 +108,12 @@ const POINTS_BASE = 100;  // base garantizada (el último en orden lógico tiend
 const HINT_UNLOCK_AFTER = 5;
 const HINT_PENALTY_PERCENT = 20;
 
+/** Tiempo del modo Clásico según cuántas palabras ya pasaron. */
+export function classicRoundSeconds(wordsPassed: number): number {
+  const completed = Math.max(0, Math.trunc(wordsPassed));
+  return Math.max(CLASSIC_MIN_SECONDS, CLASSIC_START_SECONDS - completed * CLASSIC_STEP_SECONDS);
+}
+
 export class Game extends EventEmitter {
   private players         = new Map<string, Player>();
   private phase: GamePhase = 'waiting';
@@ -116,6 +124,7 @@ export class Game extends EventEmitter {
   private round?: RoundState;
   private timer?: ReturnType<typeof setInterval>;
   private countdownTimer?: ReturnType<typeof setTimeout>;
+  private roundGapTimer?: ReturnType<typeof setTimeout>;
 
   // Palabras usadas en partidas anteriores (de la más antigua a la más reciente),
   // para no repetirlas en la siguiente. Viaja en el snapshot para que un
@@ -298,16 +307,14 @@ export class Game extends EventEmitter {
    * los timers que solo corren en el coordinador.
    */
   resume(): void {
-    if (this.timer) clearInterval(this.timer);
-    if (this.countdownTimer) clearTimeout(this.countdownTimer);
-    if (this.voteTimer) clearTimeout(this.voteTimer);
+    this.suspend();
     if ((this.phase === 'playing' || this.phase === 'countdown') && this.round) {
       // Si la caída agarró a mitad de la cuenta regresiva, no la repite desde
       // el nuevo coordinador (ya es bastante desincronización con el propio
       // failover) -> salta directo a jugar con el timeLeft que ya tenía.
       this.startRoundTimer();
     } else if (this.phase === 'roundEnd') {
-      setTimeout(() => this.nextRound(), this.gapBetweenRounds() * 1000);
+      this.scheduleNextRound();
     } else if (this.phase === 'voting') {
       // Igual que con la cuenta regresiva: no reinicia la ventana de votación
       // desde cero (ya es bastante desincronización con el propio failover) ->
@@ -318,6 +325,22 @@ export class Game extends EventEmitter {
       // antes de confirmar PostgreSQL, el nuevo líder reintenta el mismo UUID.
       this.emit('game_over', this.pendingGameOverResult);
     }
+  }
+
+  /**
+   * Detiene el motor sin alterar el snapshot. Se usa cuando este nodo pierde
+   * quorum: conserva ronda, reloj y puntajes, pero deja de avanzar hasta que
+   * exista un coordinador respaldado por la mayoría.
+   */
+  suspend(): void {
+    if (this.timer) clearInterval(this.timer);
+    clearTimeout(this.countdownTimer);
+    clearTimeout(this.voteTimer);
+    clearTimeout(this.roundGapTimer);
+    this.timer = undefined;
+    this.countdownTimer = undefined;
+    this.voteTimer = undefined;
+    this.roundGapTimer = undefined;
   }
 
   // --- Gestión de jugadores ---
@@ -546,6 +569,7 @@ export class Game extends EventEmitter {
   }
 
   private runVoteCountdown(secondsLeft: number) {
+    if (this.phase === 'gameEnd') return; // la partida se terminó a mano
     this.broadcast({ type: 'VOTE_COUNTDOWN', secondsLeft });
     if (secondsLeft > 0) {
       this.voteTimer = setTimeout(() => this.runVoteCountdown(secondsLeft - 1), 1000);
@@ -632,10 +656,19 @@ export class Game extends EventEmitter {
     return this.mode === 'relajo' ? RELAJO_GAP_BETWEEN : GAP_BETWEEN;
   }
 
+  private scheduleNextRound(): void {
+    clearTimeout(this.roundGapTimer);
+    this.roundGapTimer = setTimeout(() => {
+      this.roundGapTimer = undefined;
+      this.nextRound();
+    }, this.gapBetweenRounds() * 1000);
+  }
+
   /** Duración de una silueta según el modo. */
   private roundSeconds(): number {
     if (this.mode === 'silustack') return STACK_ROUND_SECONDS;
-    return this.mode === 'relajo' ? RELAJO_ROUND_SECONDS : TOTAL_TIME;
+    if (this.mode === 'relajo') return RELAJO_ROUND_SECONDS;
+    return classicRoundSeconds(this.currentRoundIndex);
   }
 
   private bonusPerSolver(): number { return RELAJO_BONUS_PER_SOLVER; }
@@ -848,6 +881,11 @@ export class Game extends EventEmitter {
   }
 
   private nextRound() {
+    // El master pudo terminar la partida mientras corría la pausa entre rondas:
+    // esos setTimeout no se pueden cancelar, así que se frenan acá.
+    // Solo 'gameEnd': al arrancar SiluStack o Relajo la fase todavía es
+    // 'waiting' y esta misma función es la que pone en marcha la partida.
+    if (this.phase === 'gameEnd') return;
     this.currentRoundIndex++;
     if (this.currentRoundIndex >= this.rounds.length) {
       // Relajo no termina por quedarse sin siluetas: solo el reloj lo mata.
@@ -863,6 +901,7 @@ export class Game extends EventEmitter {
 
     const entry = this.rounds[this.currentRoundIndex];
     const chars = entry.word.split('');
+    const roundDuration = this.roundSeconds();
 
     // Orden de revelación aleatorio (solo índices de letras, no espacios)
     const letterIndices = chars
@@ -875,8 +914,8 @@ export class Game extends EventEmitter {
       hiddenWord:    chars.map(c => (c === ' ' ? ' ' : '_')),
       revealOrder,
       revealedCount: 0,
-      timeLeft:      this.roundSeconds(),
-      totalTime:     this.roundSeconds(),
+      timeLeft:      roundDuration,
+      totalTime:     roundDuration,
       solvers:       [],
       hintedPlayerIds: [],
     };
@@ -916,6 +955,7 @@ export class Game extends EventEmitter {
 
   /** "3, 2, 1, ¡YA!" — al llegar a 0 arranca el timer real (mismo instante). */
   private runCountdown(secondsLeft: number) {
+    if (this.phase === 'gameEnd') return; // la partida se terminó a mano
     this.broadcast({ type: 'COUNTDOWN', value: secondsLeft });
     if (secondsLeft > 0) {
       this.countdownTimer = setTimeout(() => this.runCountdown(secondsLeft - 1), 1000);
@@ -1154,7 +1194,7 @@ export class Game extends EventEmitter {
     });
     this.broadcastRanking(false);
 
-    setTimeout(() => this.nextRound(), this.gapBetweenRounds() * 1000);
+    this.scheduleNextRound();
   }
 
   /** Cierra el modo Relajo: se acabó el reloj comunitario. */
@@ -1174,8 +1214,24 @@ export class Game extends EventEmitter {
     this.endGame();
   }
 
+  /**
+   * Termina la partida a pedido del master, en cualquier momento.
+   *
+   * Devuelve false si no había nada que terminar, para que el servidor no
+   * difunda un final que nadie pidió.
+   */
+  endGameNow(): boolean {
+    if (this.phase === 'waiting' || this.phase === 'gameEnd') return false;
+    this.clock.tick(); // evento interno: fin anticipado
+    this.endGame();
+    return true;
+  }
+
   private endGame() {
-    if (this.timer) clearInterval(this.timer);
+    // Cortar TODOS los relojes, no solo el de la ronda: si se termina durante
+    // la votación, cuenta regresiva o pausa, esos temporizadores seguirían
+    // vivos y arrancarían una ronda después del final.
+    this.suspend();
     this.phase = 'gameEnd';
 
     // v2: emitir el resultado final para que el coordinador lo persista (Paso 3).
@@ -1191,9 +1247,12 @@ export class Game extends EventEmitter {
       }));
     const result: GameOverResult = {
       gameId: this.currentGameId ?? randomUUID(),
+      mode: this.mode,
       totalRounds: this.mode === 'silustack'
         ? Math.max(0, ...(this.stack?.boards.map(board => board.pieces) ?? [0]))
-        : this.rounds.length,
+        : this.mode === 'relajo'
+          ? this.cleared
+          : this.rounds.length,
       standings,
     };
     // Se asigna ANTES del broadcast final: ese broadcast dispara N_REPLICATE,

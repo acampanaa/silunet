@@ -8,20 +8,20 @@ Silunet usa TypeScript, por lo que la cobertura real se genera con `c8` sobre tr
 - `src/mutex.ts`: exclusión mutua y cola FIFO.
 - `src/wordBank.ts`: dificultad, consistencia del banco y selección sin repeticiones.
 
-`test/unit/SilunetTest.ts` contiene 12 pruebas unitarias. El umbral automático exige al menos 90 % en líneas, sentencias y funciones, y 85 % en ramas.
+`test/unit/SilunetTest.ts` contiene 11 pruebas unitarias. El umbral automático exige al menos 90 % en líneas, sentencias y funciones, y 85 % en ramas.
 
 `test/junit/SilunetTest.java` usa JUnit 5 para comprobar el servidor Node real como caja negra. No se usa JaCoCo porque no puede medir código TypeScript.
 
-`test/selenium/SilunetSeleniumTest.java` contiene 7 ejercicios funcionales con Selenium WebDriver. Está marcada con `@Tag("selenium")` y Surefire excluye esa etiqueta por defecto, así que `npm run test:junit` no abre navegadores; el perfil `-Pselenium` invierte el filtro. Ver `test/selenium/README.md`.
+`test/selenium/SilunetSeleniumTest.java` contiene 7 ejercicios funcionales con Selenium WebDriver. `test/selenium/P2PFireTest.java` añade la prueba de fuego con WebRTC y caída del único servidor. Ambas están marcadas con `@Tag("selenium")`; Surefire excluye esa etiqueta por defecto, así que `npm run test:junit` no abre navegadores y el perfil `-Pselenium` invierte el filtro.
 
 ## Resultados verificados
 
 Última ejecución local:
 
-- TypeScript: 12 pruebas aprobadas, 0 fallos.
-- Cobertura: 99.26 % líneas, 99.26 % sentencias, 100 % funciones y 89.32 % ramas.
-- JUnit: 7 pruebas aprobadas, 0 fallos y 0 errores.
-- Selenium: 7 pruebas aprobadas, 0 fallos.
+- TypeScript: 11 pruebas aprobadas, 0 fallos.
+- Cobertura: 98.77 % líneas, 98.77 % sentencias, 100 % funciones y 87 % ramas.
+- JUnit: 9 pruebas aprobadas, 0 fallos y 0 errores.
+- Selenium: 8 pruebas aprobadas, 0 fallos (7 funcionales + prueba P2P).
 
 La cobertura corresponde únicamente a las tres unidades enumeradas. SonarQube analiza la calidad de todo `src/` y `public/`, pero el porcentaje de cobertura se limita explícitamente mediante `sonar.coverage.inclusions`.
 
@@ -44,6 +44,9 @@ Selenium:
 
 ```bash
 npm run test:selenium
+
+# Solo la prueba de fuego P2P
+npm run test:p2p-fire
 ```
 
 Resultados generados:

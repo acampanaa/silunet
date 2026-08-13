@@ -553,6 +553,7 @@
   <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
+  <script src="/p2p.js?v=20260813-offline-assets"></script>
 </head>
 <body>
 
@@ -757,29 +758,49 @@
   // acumulado de esta partida (ver Game.addPlayer -> reconexión por token).
   let ws;
   let pingTimer;
+  let joinRetryTimer;
   let reconnectTimer;
   let reconnectAttempt = 0;
   let nodeIdx = 0;
+  let p2pReadyNotified = false;
   const nodeList = buildNodeList();
+  const p2p = window.SilunetP2P.create({
+    role: 'player',
+    onGameMessage: dispatchGameMessage,
+    onStatus: handleP2PStatus,
+  });
+  window.__silunetP2P = p2p;
+  p2p.attachSignaling(sendServer);
 
   function buildNodeList() {
     const self = 'ws://' + location.host;
     const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     const others = (window.SILUNET_NODES || []).map(httpToWs).filter(u => u !== self);
-    return [self, ...others];
+    return [...new Set([self, ...others])];
+  }
+
+  function sendJoin() {
+    const token = localStorage.getItem('silunet_token');
+    send({ type: 'JOIN', nick: myNick, token, avatarId: myAvatar });
   }
 
   function connectWS() {
     ws = new WebSocket(nodeList[nodeIdx]);
+    window.__silunetSocket = ws;
 
     ws.onopen = () => {
       reconnectAttempt = 0;
-      hideReconnecting();
+      p2p.serverOpened();
+      if (!p2p.failoverActive) hideReconnecting();
       // v2: enviar el token persistente si este celular ya jugó antes (identidad).
       // Eje 4: si veníamos de una caída mid-partida, este mismo token es lo que
       // le permite al servidor reconocernos y devolvernos el puntaje acumulado.
-      const token = localStorage.getItem('silunet_token');
-      send({ type: 'JOIN', nick: myNick, token, avatarId: myAvatar });
+      sendJoin();
+      // Si abrimos el socket durante los pocos segundos de la elección, el
+      // seguidor todavía no puede reenviar el JOIN. Repetirlo hasta WELCOME
+      // evita quedar conectado pero fuera de la partida.
+      clearInterval(joinRetryTimer);
+      joinRetryTimer = setInterval(sendJoin, 1500);
       clearInterval(pingTimer);
       // Eje 4: heartbeat del celular al servidor cada 1000 ms
       pingTimer = setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
@@ -789,6 +810,8 @@
 
     ws.onclose = () => {
       clearInterval(pingTimer);
+      clearInterval(joinRetryTimer);
+      p2p.serverClosed();
       showReconnecting();
       reconnectAttempt++;
       // Tras 2 intentos seguidos al mismo nodo, prueba el siguiente del clúster
@@ -804,8 +827,13 @@
 
   function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
+    if (p2p.handleServerMessage(msg)) return;
     // Eje 2: sincronizar reloj local con cualquier timestamp del servidor
     if (msg.lamport != null) lUpdate(msg.lamport);
+    dispatchGameMessage(msg);
+  }
+
+  function dispatchGameMessage(msg) {
     switch (msg.type) {
       case 'WELCOME':         handleWelcome(msg);       break;
       case 'PLAYER_COUNT':    handlePlayerCount(msg);   break;
@@ -833,7 +861,51 @@
     }
   }
 
-  function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+  function sendServer(msg) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  }
+
+  function send(msg) {
+    if ((msg.type === 'GUESS' || msg.type === 'REQUEST_HINT') && p2p.submitAction(msg)) return;
+    sendServer(msg);
+  }
+
+  function handleP2PStatus(status) {
+    if (status.type === 'assets-ready') {
+      showNotif(
+        status.count > 0
+          ? 'Partida offline lista · imágenes guardadas en este celular'
+          : 'Partida offline lista · siluetas embebidas',
+        'success',
+        4500,
+      );
+      return;
+    }
+    if (status.type === 'mesh') {
+      if (!status.ready) {
+        p2pReadyNotified = false;
+      } else if (!p2pReadyNotified) {
+        p2pReadyNotified = true;
+        showNotif('Respaldo P2P listo entre jugadores', 'success', 4000);
+      }
+      return;
+    }
+    if (status.type !== 'failover') return;
+    currentMode = 'clasico';
+    const banner = document.getElementById('reconnect-banner');
+    const text = banner?.querySelector('span:last-child');
+    if (text) text.textContent = status.isLeader
+      ? 'Servidor fuera · este dispositivo coordina la partida P2P'
+      : 'Servidor fuera · la partida continúa entre jugadores por P2P';
+    banner?.classList.add('show');
+    showNotif(
+      status.isLeader
+        ? 'Prueba de fuego activa: ahora coordinas la partida.'
+        : 'Prueba de fuego activa: otro jugador tomó el control.',
+      'success',
+      5000,
+    );
+  }
 
   // El banner solo tiene sentido si ya habíamos llegado a jugar una vez; el
   // primer intento de conexión ya lo cubre la pantalla "Conectando...".
@@ -861,6 +933,7 @@
   }
 
   function handleWelcome(msg) {
+    clearInterval(joinRetryTimer);
     myPlayerId = msg.playerId;
     // v2: guardar la identidad persistente y reflejar el nick autoritativo del servidor
     if (msg.token) localStorage.setItem('silunet_token', msg.token);
@@ -875,6 +948,7 @@
     if (myAvatarKey) localStorage.setItem('silunet_avatar_key', myAvatarKey);
     else localStorage.removeItem('silunet_avatar_key');
     updateAvatarSurfaces();
+    p2p.register(myPlayerId, myNick);
 
     // Eje 4: si el servidor nos reconoció por token con puntaje de esta partida
     // en curso, es una RECONEXIÓN (nuestro nodo se cayó o perdimos heartbeat) —
@@ -1119,15 +1193,7 @@
   // archivo (msg.image, generado por scripts/procesar-imagenes.py). El PNG se
   // inyecta como mascara para que tome el color del tema.
   function pintarSilueta(caja, msg) {
-    if (!caja) return;
-    if (!msg.image) { caja.innerHTML = msg.svg; return; }
-    // Se arma por DOM y no concatenando HTML: la URL va a una custom property
-    // de CSS y meterla en un string con comillas anidadas es como se rompio antes.
-    caja.innerHTML = '';
-    const capa = document.createElement('span');
-    capa.className = 'silueta-img';
-    capa.style.setProperty('--silueta', 'url("' + msg.image + '")');
-    caja.appendChild(capa);
+    p2p.renderSilhouette(caja, msg);
   }
 
   function paintRound(msg) {
@@ -1315,8 +1381,9 @@
     }
     roundActive = false;
     // Recien ahora se puede mostrar el objeto a color: la ronda ya cerro.
-    document.getElementById('re-image').innerHTML = msg.reveal
-      ? '<img class="reveal-img" alt="" src="' + msg.reveal + '">'
+    const revealUrl = p2p.assetUrl(msg.reveal);
+    document.getElementById('re-image').innerHTML = revealUrl
+      ? '<img class="reveal-img" alt="" src="' + revealUrl + '">'
       : '';
     document.getElementById('re-word').textContent = msg.word;
     const el = document.getElementById('re-solvers');

@@ -11,8 +11,10 @@
     "test:junit": "npm run build && node scripts/run-maven.js test",
     "test:selenium": "npm run build && node scripts/run-maven.js test -Pselenium",
     "test:selenium:headed": "npm run build && node scripts/run-maven.js test -Pselenium -DseleniumHeadless=false",
+    "test:p2p-fire": "npm run build && node scripts/run-maven.js test -Pselenium -Dtest=P2PFireTest",
     "vv:concurrencia": "node vv/concurrencia-lamport.js",
-    "vv:caos": "node vv/caos-coordinador.js"
+    "vv:caos": "node vv/caos-coordinador.js",
+    "vv:latencia": "node vv/latencia.js"
   },
   "dependencies": {
     "pg": "^8.22.0",

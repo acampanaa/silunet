@@ -24,14 +24,15 @@ export class Cluster extends EventEmitter {
   coordinatorId:   string;   // puede cambiar con Bully (Eje 4)
   readonly clock:  LamportClock;
 
-  // peerId → WebSocket (tanto conexiones salientes como entrantes)
-  private peers = new Map<string, WebSocket>();
+  // Un par de nodos puede abrir simultáneamente una conexión entrante y otra
+  // saliente. Se conservan ambas: cerrar una no debe borrar la otra, que puede
+  // seguir sana y transportando heartbeats.
+  private peers = new Map<string, Set<WebSocket>>();
   private peerUrls: string[];
 
   // Eje 4: último latido recibido por peer, y timers de heartbeat
   private lastSeen = new Map<string, number>();
   private hbTimer?:   ReturnType<typeof setInterval>;
-  private hbMonitor?: ReturnType<typeof setInterval>;
 
   // Eje 4: nodos vistos al menos una vez (para el panel de salud)
   private knownNodes = new Set<string>();
@@ -74,6 +75,34 @@ export class Cluster extends EventEmitter {
     return { nodes, electionInProgress: this.electionInProgress };
   }
 
+  /** Registra un socket y devuelve true únicamente cuando el peer aparece. */
+  private registerPeer(peerId: string, ws: WebSocket): boolean {
+    let sockets = this.peers.get(peerId);
+    const firstConnection = !sockets || sockets.size === 0;
+    if (!sockets) {
+      sockets = new Set<WebSocket>();
+      this.peers.set(peerId, sockets);
+    }
+    sockets.add(ws);
+    this.lastSeen.set(peerId, Date.now());
+    this.knownNodes.add(peerId);
+    return firstConnection;
+  }
+
+  /** Retira solo el socket cerrado; devuelve true si el peer quedó sin rutas. */
+  private unregisterPeer(peerId: string, ws: WebSocket): boolean {
+    const sockets = this.peers.get(peerId);
+    if (!sockets || !sockets.delete(ws)) return false;
+    if (sockets.size > 0) return false;
+    this.peers.delete(peerId);
+    this.lastSeen.delete(peerId);
+    return true;
+  }
+
+  private openSocket(peerId: string): WebSocket | undefined {
+    return [...(this.peers.get(peerId) ?? [])].find(ws => ws.readyState === WebSocket.OPEN);
+  }
+
   // ── Conexiones entrantes (llamado por server.ts cuando detecta x-silunet-peer) ──
 
   handleIncomingPeer(ws: WebSocket) {
@@ -87,25 +116,26 @@ export class Cluster extends EventEmitter {
       if (!peerId) {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
-        this.peers.set(peerId, ws);
-        this.lastSeen.set(peerId, Date.now());
-        this.knownNodes.add(peerId);
+        const firstConnection = this.registerPeer(peerId, ws);
         this.clock.update(msg.lamport);
         // Responder con nuestro propio HELLO
         this.rawSend(ws, { type: 'N_HELLO', nodeId: this.nodeId, lamport: this.clock.tick() });
-        console.log(`[${this.nodeId}] Peer conectado (entrante): ${peerId}`);
-        this.emit('peer_connected', peerId);
+        if (firstConnection) {
+          console.log(`[${this.nodeId}] Peer conectado (entrante): ${peerId}`);
+          this.emit('peer_connected', peerId);
+        }
         return;
       }
 
-      this.onFrame(ws, peerId, msg);
+      this.onFrame(peerId, msg);
     });
 
     ws.on('close', () => {
       if (peerId) {
-        this.peers.delete(peerId);
-        console.log(`[${this.nodeId}] Peer desconectado: ${peerId}`);
-        this.emit('peer_disconnected', peerId);
+        if (this.unregisterPeer(peerId, ws)) {
+          console.log(`[${this.nodeId}] Peer desconectado: ${peerId}`);
+          this.emit('peer_disconnected', peerId);
+        }
         peerId = null;
       }
     });
@@ -125,7 +155,7 @@ export class Cluster extends EventEmitter {
   // ── Heartbeats (Eje 4) ─────────────────────────────────────────────────────
 
   /** Procesa un frame de un peer ya identificado; intercepta los latidos. */
-  private onFrame(ws: WebSocket, peerId: string, msg: N2N) {
+  private onFrame(peerId: string, msg: N2N) {
     this.lastSeen.set(peerId, Date.now());
     if (msg.type === 'N_HEARTBEAT') { this.clock.merge(msg.lamport); return; }
     this.clock.update(msg.lamport);
@@ -234,19 +264,21 @@ export class Cluster extends EventEmitter {
     this.hbTimer = setInterval(() => {
       this.broadcastToPeers({ type: 'N_HEARTBEAT', nodeId: this.nodeId, lamport: this.clock.value });
     }, HEARTBEAT_INTERVAL_MS);
-    this.hbMonitor = setInterval(() => this.checkTimeouts(), HEARTBEAT_INTERVAL_MS);
+    setInterval(() => this.checkTimeouts(), HEARTBEAT_INTERVAL_MS);
   }
 
   /** Marca como caído a todo peer del que no llega latido dentro del umbral. */
   private checkTimeouts() {
     const now = Date.now();
-    for (const [peerId, ws] of [...this.peers]) {
+    for (const [peerId, sockets] of [...this.peers]) {
       const last = this.lastSeen.get(peerId) ?? now;
       if (now - last > HEARTBEAT_TIMEOUT_MS) {
         console.warn(`[${this.nodeId}] heartbeat perdido de ${peerId} (${now - last}ms) -> caido`);
         this.peers.delete(peerId);
         this.lastSeen.delete(peerId);
-        try { ws.terminate(); } catch { /* ya cerrado */ }
+        for (const ws of sockets) {
+          try { ws.terminate(); } catch { /* ya cerrado */ }
+        }
         this.emit('peer_timeout', peerId);      // señal para Bully (Paso C)
         this.emit('peer_disconnected', peerId);
       }
@@ -269,22 +301,21 @@ export class Cluster extends EventEmitter {
       if (!peerId) {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
-        this.peers.set(peerId, ws);
-        this.lastSeen.set(peerId, Date.now());
-        this.knownNodes.add(peerId);
+        const firstConnection = this.registerPeer(peerId, ws);
         this.clock.update(msg.lamport);
-        console.log(`[${this.nodeId}] Conectado a peer (saliente): ${peerId}`);
-        this.emit('peer_connected', peerId);
+        if (firstConnection) {
+          console.log(`[${this.nodeId}] Conectado a peer (saliente): ${peerId}`);
+          this.emit('peer_connected', peerId);
+        }
         return;
       }
 
-      this.onFrame(ws, peerId, msg);
+      this.onFrame(peerId, msg);
     });
 
     ws.on('close', () => {
       if (peerId) {
-        this.peers.delete(peerId);
-        this.emit('peer_disconnected', peerId);
+        if (this.unregisterPeer(peerId, ws)) this.emit('peer_disconnected', peerId);
         peerId = null;
       }
       // Reintentar conexión después de 3s
@@ -303,7 +334,7 @@ export class Cluster extends EventEmitter {
       setImmediate(() => this.emit('peer_message', msg, this.nodeId));
       return;
     }
-    const ws = this.peers.get(this.coordinatorId);
+    const ws = this.openSocket(this.coordinatorId);
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     } else {
@@ -313,15 +344,16 @@ export class Cluster extends EventEmitter {
 
   /** Envía a un peer específico. */
   sendToPeer(peerId: string, msg: N2N) {
-    const ws = this.peers.get(peerId);
+    const ws = this.openSocket(peerId);
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
 
   /** Difunde a todos los peers conectados. */
   broadcastToPeers(msg: N2N) {
     const data = JSON.stringify(msg);
-    for (const ws of this.peers.values()) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    for (const peerId of this.peers.keys()) {
+      const ws = this.openSocket(peerId);
+      if (ws?.readyState === WebSocket.OPEN) ws.send(data);
     }
   }
 

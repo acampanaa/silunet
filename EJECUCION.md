@@ -1,254 +1,127 @@
-# Cómo ejecutar Silunet — Guía paso a paso
+# Cómo ejecutar Silunet
 
-Esta guía explica cómo descargar las dependencias y poner a correr el proyecto,
-primero en **un solo nodo** (lo más rápido para probar el juego) y luego como
-**clúster de 3 nodos** (lo que demuestra los 4 ejes de sistemas distribuidos).
+Esta guía cubre el despliegue recomendado para la demostración: **una laptop
+host**, un **router independiente** y entre **2 y 5 jugadores**. El host sirve la
+aplicación y señaliza el primer encuentro; después, los navegadores mantienen una
+malla WebRTC capaz de continuar el modo Clásico si la laptop desaparece.
 
-El estado de la partida vive en memoria y se replica entre nodos. El historial
-(perfiles, partidas y salón de la fama) usa una base PostgreSQL compartida; no
-se necesita Redis.
+## 1. Requisitos
 
----
+- Node.js 22 o superior.
+- Un navegador moderno en la laptop y en cada celular.
+- Un router o punto de acceso independiente con *AP/Client Isolation* desactivado.
+- Git, únicamente si se clonará el repositorio.
+- Docker Desktop, opcional, solo para levantar PostgreSQL local.
 
-## 1. Requisitos previos
+La laptop no debe funcionar como hotspot durante la prueba de fuego: el router debe
+permanecer encendido cuando se desconecte la laptop.
 
-Antes de empezar, instala en tu computadora:
+## 2. Instalación
 
-- **Node.js 22 o superior** (incluye `npm`). Verifica que esté listo:
-  ```bash
-  node --version
-  npm --version
-  ```
-  Si `node --version` muestra `v22.x` o mayor, estás bien.
-  Descarga: https://nodejs.org (elige la versión **LTS**).
-- **Git** (solo si vas a clonar el repositorio).
-
----
-
-## 2. Abrir el proyecto
-
-Si **ya tienes la carpeta del proyecto** (porque la descargaste o ya está en tu
-computadora), solo abre una terminal **dentro de ella** y continúa con el paso 3.
-
-Si todavía necesitas obtenerlo, clónalo (o descarga el ZIP desde GitHub y
-descomprímelo) y entra a la carpeta que se crea:
-
-```bash
-git clone <URL-del-repositorio>
-cd silunet
-```
-
-> A partir de aquí, todos los comandos se ejecutan **dentro de la carpeta del
-> proyecto** (donde está el archivo `package.json`).
-
----
-
-## 3. Instalar las dependencias
-
-Un solo comando descarga todo lo que el proyecto necesita (`ws`, `pg` y las
-herramientas de TypeScript):
-
-```bash
+```powershell
 npm install
-```
-
-Esto crea la carpeta `node_modules/`. Solo hay que hacerlo **una vez** (o cuando
-cambien las dependencias).
-
----
-
-## 4. Compilar el proyecto
-
-El servidor está escrito en TypeScript y hay que convertirlo a JavaScript antes
-de ejecutarlo:
-
-```bash
 npm run build
 ```
 
-Esto genera la carpeta `dist/` con el servidor listo para correr.
+El build genera `dist/`; esa carpeta y los reportes de pruebas no se versionan.
 
-### PostgreSQL local para desarrollo
+## 3. Arranque recomendado
 
-Con Docker Desktop iniciado:
+En PowerShell:
 
-```bash
+```powershell
+.\scripts\node1.ps1
+```
+
+También puede arrancarse directamente:
+
+```powershell
+$env:NODE_ID="host-p2p"
+$env:PORT="3001"
+node dist/server.js
+```
+
+La consola muestra dos direcciones:
+
+- `http://localhost:3001/master`: pantalla maestra.
+- `http://IP-DE-LA-LAPTOP:3001/join`: enlace para los celulares.
+
+Si Windows pregunta por el firewall, permitir Node.js en la red privada.
+
+## 4. Preparar la continuidad P2P
+
+1. Conectar la laptop y todos los celulares al mismo router.
+2. Abrir `/master` en la laptop y `/join` en cada celular.
+3. Esperar en todos los celulares el aviso **“Respaldo P2P listo entre jugadores”**.
+4. Iniciar una partida en modo **Clásico**.
+5. Esperar el aviso **“Partida offline lista”** en cada celular. Esto confirma que
+   las imágenes de las rondas ya están guardadas localmente.
+
+No desconectar la laptop antes de ambos avisos. Si el primero no aparece, revisar
+*Client Isolation*, VPN, datos móviles y que todos estén realmente en la misma LAN.
+
+## 5. Prueba de fuego
+
+Con una ronda clásica en curso, apagar el Wi-Fi de la laptop o detener el servidor.
+El router debe seguir encendido.
+
+En aproximadamente 4–5 segundos:
+
+1. Los celulares detectan la ausencia de `PONG`, incluso si el WebSocket queda
+   falsamente abierto.
+2. La mayoría confirma la caída.
+3. Bully elige un único navegador jugador como coordinador.
+4. Continúan reloj, siluetas, respuestas, puntajes y rondas.
+
+Limitaciones durante la caída:
+
+- Solo continúa el modo Clásico.
+- No pueden entrar jugadores nuevos ni recargarse las páginas.
+- La pantalla master de la laptop desconectada deja de actualizarse.
+- El historial se persiste cuando existe un host y una base disponibles; no forma
+  parte del camino crítico del failover.
+
+## 6. PostgreSQL opcional con Docker
+
+SQLite es suficiente para una demostración local. Para perfiles e historial en
+PostgreSQL:
+
+```powershell
 docker compose up -d postgres
-```
-
-La conexión local será:
-
-```text
-postgresql://silunet:silunet_dev@localhost:5432/silunet
-```
-
-El esquema [`BDD.sql`](BDD.sql) se aplica automáticamente. Sin `DATABASE_URL`,
-un nodo único puede usar el respaldo SQLite; el clúster de tres nodos exige
-PostgreSQL para no mostrar historiales distintos.
-
----
-
-## 5. Ejecutar en UN SOLO nodo (modo rápido para probar)
-
-Es la forma más sencilla de ver el juego funcionando. Compila y arranca el
-servidor de una sola vez:
-
-```bash
-npm run dev
-```
-
-Cuando arranque, verás en la consola algo como:
-
-```
-[node1]  COORDINADOR | Puerto 3001
-[node1]  Pantalla maestra: http://localhost:3001/master
-[node1]  URL celulares:    http://192.168.x.x:3001/join
-```
-
-Ahora abre en el navegador:
-
-- **Pantalla maestra (proyector / dashboard):** http://localhost:3001/master
-  → pulsa **"Iniciar partida"**.
-- **Jugador (un celular o pestaña):** http://localhost:3001/join
-  → escribe un nick y juega.
-
-Para probar la concurrencia abre **2 o 3 pestañas** de `/join` con nicks
-distintos. Para detener el servidor pulsa `Ctrl + C` en la consola.
-
----
-
-## 6. Ejecutar el CLÚSTER de 3 nodos (modo distribuido)
-
-Aquí es donde se demuestran los 4 ejes (Lamport, exclusión mutua, heartbeats,
-elección de líder Bully). Es el **mismo código** ejecutado 3 veces con variables
-de entorno distintas.
-
-Primero compila una sola vez:
-
-```bash
-npm run build
-```
-
-Luego abre **3 terminales** y ejecuta un nodo en cada una. Cada nodo escucha en
-un puerto distinto y conoce a los otros dos vía `PEERS`.
-
-Los tres procesos deben recibir exactamente la misma `DATABASE_URL`.
-
-### En Linux / macOS (bash)
-
-```bash
-export DATABASE_URL='postgresql://silunet:silunet_dev@localhost:5432/silunet'
-
-# Terminal 1 — nodo 1 (coordinador inicial)
-NODE_ID=node1 PORT=3001 COORDINATOR_ID=node1 PEERS=ws://localhost:3002,ws://localhost:3003 node dist/server.js
-
-# Terminal 2 — nodo 2
-NODE_ID=node2 PORT=3002 COORDINATOR_ID=node1 PEERS=ws://localhost:3001,ws://localhost:3003 node dist/server.js
-
-# Terminal 3 — nodo 3
-NODE_ID=node3 PORT=3003 COORDINATOR_ID=node1 PEERS=ws://localhost:3001,ws://localhost:3002 node dist/server.js
-```
-
-### En Windows (PowerShell)
-
-```powershell
 $env:DATABASE_URL="postgresql://silunet:silunet_dev@localhost:5432/silunet"
-
-# Terminal 1 — nodo 1 (coordinador inicial)
-$env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://localhost:3002,ws://localhost:3003"; node dist/server.js
-
-# Terminal 2 — nodo 2
-$env:NODE_ID="node2"; $env:PORT="3002"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://localhost:3001,ws://localhost:3003"; node dist/server.js
-
-# Terminal 3 — nodo 3
-$env:NODE_ID="node3"; $env:PORT="3003"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://localhost:3001,ws://localhost:3002"; node dist/server.js
+.\scripts\node1.ps1
 ```
 
-Cuando los 3 estén arriba, cada consola mostrará `✓ Peer listo: nodeX`.
+Docker no mantiene viva la partida. La continuidad corresponde a las réplicas WebRTC
+de los navegadores.
 
-Abre la pantalla maestra de **cualquier** nodo (todos comparten el mismo estado
-replicado), por ejemplo http://localhost:3001/master, e inicia la partida. Los
-jugadores pueden entrar por el `/join` de cualquier nodo (`:3001`, `:3002` o
-`:3003`) y compiten sobre el mismo marcador.
-
-### Probar la tolerancia a fallos (Eje 4)
-
-Con la partida en curso, cierra (`Ctrl + C`) la terminal del **coordinador**
-(`node1`). Los otros dos detectan la caída por heartbeats y eligen un nuevo
-coordinador (algoritmo del Matón / Bully) sin que la partida se congele. El
-panel de salud del clúster en `/master` refleja el cambio en vivo.
-
-### Los 3 nodos en 3 laptops distintas (feria real)
-
-Los ejemplos de arriba (`localhost`) sirven para probar el clúster en **una
-sola máquina**. El día de la feria cada nodo corre en su propia laptop, todas
-conectadas al mismo router/AP propio (ver sección de despliegue). En ese caso
-`PEERS` debe llevar la **IP real de cada laptop en esa red**, no `localhost`:
-
-En las tres laptops configura además la misma `DATABASE_URL` de una instancia
-PostgreSQL accesible desde la LAN. Para conservar el historial si cae cualquier
-nodo, la base no debe depender exclusivamente de la laptop coordinadora.
+## 7. Pruebas antes de presentar
 
 ```powershell
-# Laptop 1 (IP 192.168.50.10) — nodo 1
-$env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.11:3002,ws://192.168.50.12:3003"; node dist/server.js
-
-# Laptop 2 (IP 192.168.50.11) — nodo 2
-$env:NODE_ID="node2"; $env:PORT="3002"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.12:3003"; node dist/server.js
-
-# Laptop 3 (IP 192.168.50.12) — nodo 3
-$env:NODE_ID="node3"; $env:PORT="3003"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.11:3002"; node dist/server.js
+npm run build
+npm run test:unit
+npm run test:junit
+npm run test:p2p-fire
 ```
 
-Averigua la IP de cada laptop en esa red (`ipconfig` en Windows, buscar el
-adaptador Wi-Fi) **antes** de arrancar los nodos, e idealmente resérvala como
-IP fija en el router (DHCP reservation) para que no cambie si el router
-reinicia. Si una laptop tiene Wi-Fi y Ethernet activos a la vez (por ejemplo,
-conectada por error también al cable del recinto), confirma que `PEERS` y la
-URL del QR apunten a la IP del router propio, no a la otra red.
+`test:p2p-fire` abre navegadores Chrome reales, forma la malla, neutraliza el evento
+`onclose`, mata el único servidor y comprueba que ambos jugadores eligen el mismo
+líder, conservan imágenes locales, aceptan respuestas y avanzan de ronda.
 
----
+## 8. Clúster de servidores opcional
 
-## 7. Variables de entorno
+`scripts/node2.ps1`, `scripts/node3.ps1` y `npm run vv:caos` se conservan como
+validación avanzada del clúster de procesos. No son necesarios para el despliegue de
+una laptop ni para la continuidad P2P entre celulares. La configuración completa se
+documenta en la sección “Modo B” del [`README.md`](README.md).
 
-| Variable         | Para qué sirve                                              | Valor por defecto |
-|------------------|------------------------------------------------------------|-------------------|
-| `NODE_ID`        | Identificador único del nodo dentro del clúster.           | `node1`           |
-| `PORT`           | Puerto HTTP/WebSocket donde escucha el nodo.               | `3001`            |
-| `COORDINATOR_ID` | Quién es el coordinador inicial al arrancar.               | `node1`           |
-| `PEERS`          | Lista (separada por comas) de URLs WS de los otros nodos.  | *(vacío)*         |
-| `DATABASE_URL`   | Conexión PostgreSQL compartida por todos los nodos.        | *(vacío)*         |
-| `DB_POOL_SIZE`   | Máximo de conexiones PostgreSQL por nodo.                  | `5`               |
-| `CLUSTER_ID`     | Identificador de la concesión de escritura.                | `silunet-main`    |
+## 9. Problemas frecuentes
 
-> Si `PEERS` queda vacío, el nodo corre **solo** (modo de la sección 5).
-
----
-
-## 8. Resumen de comandos
-
-| Acción                          | Comando            |
-|---------------------------------|--------------------|
-| Instalar dependencias           | `npm install`      |
-| Compilar TypeScript → `dist/`   | `npm run build`    |
-| Compilar y arrancar (1 nodo)    | `npm run dev`      |
-| Arrancar lo ya compilado        | `npm start`        |
-| Levantar PostgreSQL local       | `docker compose up -d postgres` |
-
----
-
-## 9. Problemas comunes
-
-- **`'node' no se reconoce` / `command not found`:** Node.js no está instalado o
-  no está en el PATH. Reinstala desde https://nodejs.org y reabre la terminal.
-- **`Error: listen EADDRINUSE :::3001`:** el puerto ya está ocupado (otro nodo o
-  un servidor anterior). Ciérralo o usa otro `PORT`.
-- **Cambié código TypeScript y no veo el cambio:** vuelve a ejecutar
-  `npm run build` (o usa `npm run dev`, que compila antes de arrancar).
-- **Los celulares no abren la página:** deben estar en la **misma red Wi-Fi** que
-  el servidor y usar la IP local (`http://192.168.x.x:3001/join`), no
-  `localhost`. La IP correcta aparece impresa en la consola al arrancar.
-- **Los nodos no se conectan entre sí:** revisa que las URLs de `PEERS` apunten a
-  los puertos correctos y que cada nodo tenga un `NODE_ID` y `PORT` distinto.
-- **El clúster exige `DATABASE_URL`:** define la misma conexión PostgreSQL en las
-  tres terminales y revisa credenciales, firewall y acceso de red.
+| Síntoma | Solución |
+|---|---|
+| Los celulares no abren el enlace | Usar la IP LAN, no `localhost`, y permitir el puerto 3001 en el firewall. |
+| No aparece “Respaldo P2P listo” | Desactivar *AP/Client Isolation* y VPN; comprobar que los celulares se vean entre sí. |
+| Al apagar la laptop también desaparece la Wi-Fi | La laptop era el hotspot; usar un router independiente. |
+| Tras editar TypeScript no cambia el sistema | Ejecutar `npm run build` y reiniciar el servidor. |
+| Aparece una versión anterior en el celular | Cerrar la pestaña y volver a entrar desde `/join`. |
+| PostgreSQL no responde | Quitar temporalmente `DATABASE_URL`; el juego puede usar SQLite local. |

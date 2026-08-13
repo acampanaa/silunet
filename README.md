@@ -1,6 +1,6 @@
 # Silunet
 
-**Juego de adivinanza de siluetas en tiempo real, sobre un clúster distribuido de 3 nodos.**
+**Juego de adivinanza de siluetas en tiempo real con continuidad P2P entre navegadores.**
 
 Proyecto integrador de **Sistemas Distribuidos** y **Gestión para la Verificación y
 Validación de Software** — PUCE Sede Manabí, Ingeniería de Software.
@@ -8,7 +8,6 @@ Validación de Software** — PUCE Sede Manabí, Ingeniería de Software.
 Diseñado para la feria "Casa Abierta": el público escanea un QR con su celular, se une
 sin instalar nada, y una pantalla proyectada muestra el estado de la partida en vivo.
 
-> La consigna original de la materia se conserva en [`CONSIGNA.md`](CONSIGNA.md).
 > Este README documenta **el sistema tal como está construido**.
 
 ---
@@ -37,7 +36,8 @@ sin instalar nada, y una pantalla proyectada muestra el estado de la partida en 
    de modo que la partida nunca se traba esperando.
 3. **Cuenta regresiva "3, 2, 1, ¡YA!"** emitida por el servidor, sincronizada para todos.
 4. Aparece la silueta + la palabra oculta con guiones (`_ E _ A _ T E`). Cada **4 s** sin
-   acierto se revela una letra adicional. La ronda dura **24 s**.
+   acierto se revela una letra adicional. En modo Clásico, la primera ronda
+   dura **25 s** y cada palabra superada resta 3 s, hasta un mínimo de **5 s**.
 5. A los **5 s** se desbloquea una **pista** opcional: usarla reduce la recompensa de esa
    ronda al **80 %**.
 6. Al cerrar todas las rondas: ranking con medallas (oro/plata/bronce) y actualización del
@@ -90,32 +90,33 @@ SVG y sumarla al mapa `ART`.
 
 ### Stack
 
-- **Backend:** Node.js + TypeScript con la librería **`ws`** (WebSocket puro, sin
-  abstracciones que oculten el protocolo). Un único código de servidor que se ejecuta
-  **tres veces** con variables de entorno distintas para formar el clúster.
-- **Frontend:** HTML + CSS + JavaScript plano, **sin proceso de build**, para que abra
-  directo desde el QR sin instalar nada.
-- **Persistencia histórica:** PostgreSQL compartido mediante `pg`. Los tres nodos usan
-  la misma `DATABASE_URL`; SQLite queda únicamente como respaldo de desarrollo local.
+- **Host inicial:** Node.js + TypeScript con **`ws`**. Una sola laptop sirve la web,
+  señaliza el primer encuentro WebRTC y controla la partida mientras permanece viva.
+- **Nodos distribuidos:** los navegadores de hasta **5 jugadores** forman una malla
+  WebRTC completa. Cada uno conserva una réplica apta para continuar el modo Clásico.
+- **Frontend:** HTML + CSS + JavaScript plano, sin proceso de build.
+- **Persistencia histórica:** PostgreSQL mediante `pg`, o SQLite local. La base no
+  participa en el camino crítico del failover P2P.
 
 ### Decisión de diseño clave: la base histórica no reemplaza el estado distribuido
 
-El estado de la partida vive **en memoria** y el coordinador lo replica a los seguidores.
-Esto es deliberado: externalizar ese estado vivo a Redis o a PostgreSQL
-**recentralizaría** el sistema y vaciaría de sentido la elección de líder — el punto único
-de fallo volvería por la puerta de atrás. La réplica entre nodos *es* el mecanismo que
-elimina el SPOF, porque cualquier seguidor tiene lo necesario para asumir la coordinación.
-PostgreSQL guarda únicamente identidades y partidas ya cerradas, donde sí se necesita una
-fuente histórica única y consistente.
+El estado autoritativo comienza en Node y se replica continuamente a los navegadores.
+Después del primer handshake, las acciones, heartbeats y elecciones pueden viajar por
+WebRTC sin HTTP ni WebSocket central. Si desaparece la laptop, los jugadores detectan la
+caída por mayoría, eligen mediante Bully al identificador más alto y ese navegador
+continúa reloj, aciertos, puntaje y rondas desde el último snapshot.
+
+PostgreSQL guarda identidades e historia, pero no mantiene vivo el juego. Durante el
+failover no entran jugadores nuevos ni se persiste el cierre hasta que regrese el host.
 
 ### Los 4 ejes: dónde vive cada uno
 
 | Eje | Mecanismo | Implementación |
 |---|---|---|
-| **1 · Comunicación bidireccional y concurrencia** | WebSockets puros, cero polling. Difusión a clientes y entre nodos. | `src/server.ts`, `src/cluster.ts` |
+| **1 · Comunicación bidireccional y concurrencia** | WebSocket para bootstrap; WebRTC DataChannels entre navegadores para continuidad sin host. | `src/server.ts`, `public/p2p.js` |
 | **2 · Sincronización y ordenamiento lógico** | Relojes de Lamport (`tick` / `update` / `merge`) ordenan los aciertos entre nodos. | `src/lamport.ts` |
 | **3 · Exclusión mutua y consistencia** | Candado lógico con cola FIFO que serializa el acceso al marcador compartido. | `src/mutex.ts` |
-| **4 · Tolerancia a fallos y reconfiguración** | Heartbeats + elección de líder (algoritmo del Matón / Bully) + réplica pasiva de estado. | `src/cluster.ts` |
+| **4 · Tolerancia a fallos y reconfiguración** | Snapshots en cada navegador + heartbeats WebRTC + elección Bully + nuevo motor líder. | `public/p2p.js` |
 
 ### Protocolo de mensajes
 
@@ -126,18 +127,20 @@ Todo el protocolo está tipado en `src/types.ts`, separado en tres familias:
 - **`C2S`** — cliente → servidor (`JOIN`, `GUESS`, `CAST_VOTE`, `PING`…)
 - **`N2N`** — nodo ↔ nodo (`N_HEARTBEAT`, `N_REPLICATE`, `N_ELECTION`, `N_ALIVE`,
   `N_COORDINATOR`, `N_FORWARD_*`…)
+- **P2P** — señalización inicial (`P2P_REGISTER`, `P2P_SIGNAL`,
+  `P2P_SNAPSHOT`) y, después, mensajes `HEARTBEAT`, `ACTION`, `GAME` y
+  `STATE` directamente por DataChannel.
 
 Un jugador conectado a un **seguidor** no nota diferencia: el seguidor reenvía su acción
 al coordinador (`N_FORWARD_GUESS`) y la respuesta vuelve enrutada a su conexión exacta
 (`N_SEND_TO`).
 
-### Roles del clúster
+### Roles durante la prueba de fuego
 
-Los tres nodos son **simétricos** (mismo código). En operación normal uno es
-**coordinador** —única fuente de verdad, el único que muta el marcador y el único que
-escribe en la base de datos— y los otros dos mantienen una **réplica pasiva** en memoria,
-lista para asumir el mando si el líder cae. Todos consultan la misma base PostgreSQL, pero
-solo el coordinador que posee una concesión vigente puede escribir en ella.
+Node es coordinador mientras está disponible. Los navegadores jugadores son réplicas
+calientes y nodos elegibles; `/master` observa y replica, pero no puede ser líder. Cuando
+cae Node, gana el jugador P2P con identificador más alto. La respuesta queda dentro del
+snapshot del navegador, una concesión aceptada para priorizar disponibilidad en esta demo.
 
 ---
 
@@ -147,37 +150,26 @@ solo el coordinador que posee una concesión vigente puede escribir en ella.
 
 ```mermaid
 flowchart TB
-    subgraph LAN["Red local del stand — router propio, sin internet"]
-        subgraph Cap1["Capa 1 · Público"]
-            C1["📱 Celular<br/>/join → /play"]
-            C2["📱 Celular"]
-            C3["📱 Celular"]
-        end
-
-        subgraph Cap2["Capa 2 · Pantalla proyectada"]
-            M["🖥️ /master<br/>solo lectura"]
-        end
-
-        subgraph Cap3["Capa 3 · Clúster de 3 nodos simétricos"]
-            N1["node1 :3001<br/>★ COORDINADOR"]
-            N2["node2 :3002<br/>réplica"]
-            N3["node3 :3003<br/>réplica"]
-        end
+    subgraph LAN["LAN del stand · router/AP independiente"]
+        H["💻 Laptop host<br/>web + señalización + juego inicial"]
+        M["🖥️ /master<br/>réplica no elegible"]
+        C1["📱 Jugador A<br/>réplica P2P"]
+        C2["📱 Jugador B<br/>réplica P2P"]
+        C3["📱 Jugador C<br/>réplica P2P"]
     end
 
-    C1 -.->|WebSocket| N1
-    C2 -.->|WebSocket| N2
-    C3 -.->|WebSocket| N3
-    M  -.->|WebSocket| N1
+    H -->|"HTTP + WebSocket inicial"| M
+    H -->|"HTTP + señalización"| C1
+    H -->|"HTTP + señalización"| C2
+    H -->|"HTTP + señalización"| C3
+    C1 <-->|WebRTC| C2
+    C2 <-->|WebRTC| C3
+    C1 <-->|WebRTC| C3
+    M <-.->|WebRTC observador| C1
+    M <-.->|WebRTC observador| C2
 
-    N1 <-->|"N2N: heartbeat<br/>réplica, elección"| N2
-    N2 <-->|N2N| N3
-    N1 <-->|N2N| N3
-
-    DB[("PostgreSQL compartido<br/>historia confirmada")]
-    N1 -->|escritura con concesión| DB
-    N2 -.->|lectura / failover| DB
-    N3 -.->|lectura / failover| DB
+    DB[("PostgreSQL / SQLite<br/>solo historia")]
+    H --> DB
 ```
 
 ### Dos aciertos concurrentes: Lamport + exclusión mutua
@@ -264,6 +256,7 @@ erDiagram
         UUID    id PK
         BIGINT  numero UK
         TEXT    nombre "ej. Casa Abierta #3"
+        TEXT    modo "clasico|relajo|silustack"
         INTEGER total_rondas
         TIMESTAMPTZ jugada_en
     }
@@ -421,7 +414,7 @@ NODE_ID=node3 PORT=3003 COORDINATOR_ID=node1 PEERS=ws://localhost:3001,ws://loca
 Cuando los tres estén arriba, cada consola muestra `✓ Peer listo: nodeX`. Los jugadores
 pueden entrar por **cualquiera** de los tres puertos y compiten sobre el mismo marcador.
 
-### 6.5. Modo C — Despliegue real en la feria (3 laptops + router propio)
+### 6.5. Modo C — Despliegue final P2P (1 laptop + router propio)
 
 **Red.** Llevar un **router/AP propio**, no usar la red del recinto (suele tener
 *AP isolation* o puertos bloqueados, lo que rompe el juego). No necesita salida a
@@ -431,38 +424,31 @@ Lista de verificación de red:
 
 - [ ] **Desactivar "AP / Client Isolation"** en el router. Es la falla más común: los
       celulares se conectan al Wi-Fi pero no pueden hablarle a las laptops.
-- [ ] **Reservar IP fija (DHCP reservation)** para las 3 laptops, para que el QR no cambie
-      si el router reinicia.
-- [ ] **Permitir el puerto de cada nodo** en el firewall de cada laptop (conexiones
-      entrantes desde la LAN).
+- [ ] **Reservar IP fija** para la laptop host, para que el QR no cambie.
+- [ ] **Permitir el puerto 3001** en el firewall de la laptop.
 - [ ] **Banda:** 5 GHz aguanta mejor la concurrencia; 2.4 GHz tiene más alcance pero se
       satura con muchos celulares.
-- [ ] **Capacidad:** un router doméstico sostiene ~30-50 dispositivos de forma confiable.
-      Para más público, usar un AP de gama media o dos APs en la misma subred.
-
-**Arranque.** Averiguar la IP de cada laptop en esa red (`ipconfig` en Windows) **antes**
-de arrancar, y usar esas IPs reales en `PEERS` — no `localhost`:
-
-Además, definir en las tres laptops la misma `DATABASE_URL` de un PostgreSQL accesible
-desde toda la LAN. Para tolerar la caída de cualquiera de los tres nodos, la base no debe
-vivir en el mismo proceso ni depender exclusivamente de la laptop coordinadora.
+- [ ] Usar **entre 2 y 5 jugadores**. Cinco jugadores producen solo 10 enlaces directos.
+- [ ] La laptop **no debe ser el hotspot**: si apaga la red física, WebRTC tampoco puede
+      continuar. El router/AP debe seguir encendido durante la prueba.
 
 ```powershell
-# Laptop 1 (192.168.50.10) — coordinador inicial
-$env:NODE_ID="node1"; $env:PORT="3001"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.11:3002,ws://192.168.50.12:3003"; node dist/server.js
-
-# Laptop 2 (192.168.50.11)
-$env:NODE_ID="node2"; $env:PORT="3002"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.12:3003"; node dist/server.js
-
-# Laptop 3 (192.168.50.12)
-$env:NODE_ID="node3"; $env:PORT="3003"; $env:COORDINATOR_ID="node1"; $env:PEERS="ws://192.168.50.10:3001,ws://192.168.50.11:3002"; node dist/server.js
+npm run build
+./scripts/node1.ps1
 ```
 
-Si una laptop tiene Wi-Fi **y** Ethernet activos a la vez, confirmar que `PEERS` y la URL
-del QR apuntan a la IP del router propio y no a la otra red.
+Abrir `http://IP-DE-LA-LAPTOP:3001/master` y compartir
+`http://IP-DE-LA-LAPTOP:3001/join`. Antes de iniciar Clásico, esperar que todos los
+jugadores hayan entrado y que **cada celular muestre "Respaldo P2P listo entre
+jugadores"**. Al comenzar la partida también debe aparecer **"Partida offline lista ·
+imágenes guardadas en este celular"**; ese segundo aviso confirma que las siluetas y
+revelaciones futuras ya no dependen del servidor. Si alguno no aparece, no ejecutar la
+prueba: revisar *AP/Client Isolation*, el firewall y que los celulares estén realmente
+en la misma LAN.
 
-**Ensayo obligatorio.** Montar el router + los 3 nodos + tantos celulares reales como se
-consiga, **uno o dos días antes**, y confirmar que todos ven la partida sin caídas.
+La continuidad P2P cubre **modo Clásico**. Relajo y SiluStack todavía requieren el host.
+Durante una caída no entran jugadores nuevos, no se recarga la página y no se escribe el
+resultado histórico hasta recuperar el servidor.
 
 ### 6.6. Verificar el despliegue
 
@@ -470,18 +456,23 @@ consiga, **uno o dos días antes**, y confirmar que todos ven la partida sin ca�
 curl http://localhost:3001/api/info
 ```
 
-Devuelve JSON con el nodo, quién es el coordinador, los peers conectados y la fase actual
-del juego — sirve para confirmar que el clúster se formó bien antes de que llegue público.
+Devuelve JSON con el host, fase y estado de persistencia. La malla de navegadores puede
+inspeccionarse desde la consola con `window.__silunetP2P.openPeerIds()`.
 
 ### 6.7. Probar la tolerancia a fallos (demo de la defensa)
 
-Con la partida en curso, `Ctrl+C` en la terminal del **coordinador**. Lo esperado:
+Con Clásico en curso, cerrar Node o desconectar de Wi-Fi la laptop host, manteniendo
+encendido el router. Lo esperado:
 
-1. Los otros dos detectan la caída por ausencia de heartbeats (~2,5 s).
-2. Ejecutan el algoritmo del Matón y eligen un nuevo coordinador.
-3. El nuevo líder reanuda la partida desde su réplica: **el público no ve congelamiento**.
-4. El panel de `/master` refleja el cambio en vivo, y los celulares del nodo caído se
-   reconectan solos a otro nodo **conservando su puntaje**.
+1. Los jugadores pierden el WebSocket, pero conservan sus DataChannels.
+2. Al faltar respuestas `PONG`, aunque el WebSocket quede falsamente en `OPEN`, tras
+   aproximadamente 4-5 s la mayoría confirma la caída.
+3. Bully elige un único navegador jugador como líder.
+4. El reloj continúa, se aceptan respuestas y arranca la siguiente ronda.
+
+```bash
+npm run test:p2p-fire
+```
 
 ### 6.8. Variables de entorno
 
@@ -491,6 +482,7 @@ Con la partida en curso, `Ctrl+C` en la terminal del **coordinador**. Lo esperad
 | `PORT` | Puerto HTTP/WebSocket donde escucha. | `3001` |
 | `COORDINATOR_ID` | Quién es coordinador al arrancar. | `node1` |
 | `PEERS` | URLs WS de los otros nodos, separadas por comas. | *(vacío = nodo solo)* |
+| `PUBLIC_NODES` | URLs HTTP LAN de los tres nodos que usarán master y celulares para reconectar. | deriva de `PEERS` |
 | `DATABASE_URL` | Conexión PostgreSQL compartida. Si falta, usa SQLite solo para desarrollo. | *(vacío)* |
 | `DB_POOL_SIZE` | Máximo de conexiones PostgreSQL por nodo. | `5` |
 | `CLUSTER_ID` | Identifica la concesión de escritura si una BD aloja varios clústeres. | `silunet-main` |
@@ -505,7 +497,7 @@ Con la partida en curso, `Ctrl+C` en la terminal del **coordinador**. Lo esperad
 | Cambié TypeScript y no veo el cambio | Falta `npm run build` (o usar `npm run dev`). |
 | Los celulares no abren la página | Deben estar en la **misma Wi-Fi** y usar la IP local (`http://192.168.x.x:3001/join`), no `localhost`. |
 | Los nodos no se ven entre sí | Revisar que `PEERS` apunte a los puertos/IPs correctos y que cada nodo tenga `NODE_ID` y `PORT` distintos. |
-| El servidor no inicia con `DATABASE_URL` | Revisar URL, credenciales, firewall y que PostgreSQL acepte conexiones desde los tres nodos. |
+| PostgreSQL queda inaccesible | El juego continúa desde la réplica; perfiles, salón de la fama y guardado quedan pendientes hasta que vuelva. Revisar URL, firewall y host de la base. |
 | El clúster rechaza SQLite | Es intencional: definir la misma `DATABASE_URL` en todos los nodos. `ALLOW_SQLITE_CLUSTER=1` es solo para V&V local. |
 
 Guía paso a paso ampliada: [`EJECUCION.md`](EJECUCION.md).
@@ -514,15 +506,27 @@ Guía paso a paso ampliada: [`EJECUCION.md`](EJECUCION.md).
 
 ## 7. Verificación y Validación
 
-Dos bots que levantan un **clúster real de 3 nodos** (el mismo `dist/server.js` de
-producción) y se conectan como clientes WebSocket reales — **no son mocks**.
+La validación principal usa Chrome, WebRTC y el servidor real; no simula el transporte:
 
 ```bash
 npm run build            # requerido antes de correr los bots
 
+npm run test:p2p-fire     # prueba clave: mata el único servidor
 npm run vv:concurrencia  # ~30 s
 npm run vv:caos          # ~3 min
 ```
+
+**`test:p2p-fire`** abre dos jugadores y una maestra en navegadores reales, forma la
+malla, inicia Clásico, cierra la maestra, mata el único proceso Node y exige:
+
+- un solo líder P2P compartido por ambos supervivientes;
+- reloj decreciente sin servidor;
+- respuesta correcta procesada por DataChannel;
+- snapshot convergente en ambos jugadores;
+- siguiente ronda iniciada mientras Node continúa muerto.
+
+Las pruebas siguientes conservan el clúster Node opcional para validar Lamport, mutex y
+el mecanismo servidor-servidor:
 
 **`vv:concurrencia`** (Ejes 2 y 3) — 7 bots repartidos en los 3 nodos aciertan "a la vez"
 y verifica que:
@@ -566,13 +570,14 @@ src/
   wordBank.ts   banco de palabras + siluetas SVG + dificultad
   types.ts      protocolo completo (S2C / C2S / N2N) y modelos de datos
 public/         cliente sin build: join.html, play.html, master.html, sounds.js
+  p2p.js        malla WebRTC, snapshots, elección y continuidad sin host
 vv/             bots de verificación y validación
-scripts/        arranque de cada nodo (PowerShell)
-docs/           reporte arquitectónico y diagramas en PNG
+scripts/        arranque del host y utilidades del proyecto
+test/           pruebas unitarias, JUnit, Selenium y prueba de fuego P2P
+docs/           reporte, diagramas y capturas de evidencia
 BDD.sql         esquema de base de datos documentado
 compose.yaml    PostgreSQL local para desarrollo
 EJECUCION.md    guía de ejecución paso a paso
-CONSIGNA.md     consigna original de la materia
 ```
 
 ### Sitemap

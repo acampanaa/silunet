@@ -40,9 +40,24 @@ CREATE TABLE IF NOT EXISTS partidas (
     id            UUID        PRIMARY KEY,
     numero        BIGINT      GENERATED ALWAYS AS IDENTITY UNIQUE,
     nombre        TEXT        NOT NULL,
-    total_rondas  INTEGER     NOT NULL CHECK (total_rondas > 0),
+    modo          TEXT        NOT NULL DEFAULT 'clasico'
+                              CHECK (modo IN ('clasico', 'relajo', 'silustack')),
+    total_rondas  INTEGER     NOT NULL CHECK (total_rondas >= 0),
     jugada_en     TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+
+-- Las partidas anteriores a los modos Relajo/SiluStack se consideran Clásico.
+ALTER TABLE partidas ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'clasico';
+
+-- Relajo o SiluStack pueden terminar antes del primer acierto/pieza.
+ALTER TABLE partidas DROP CONSTRAINT IF EXISTS partidas_total_rondas_check;
+ALTER TABLE partidas ADD CONSTRAINT partidas_total_rondas_check CHECK (total_rondas >= 0);
+
+DO $$ BEGIN
+  ALTER TABLE partidas ADD CONSTRAINT partidas_modo_check
+    CHECK (modo IN ('clasico', 'relajo', 'silustack'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS participaciones (
     partida_id     UUID     NOT NULL REFERENCES partidas(id) ON DELETE CASCADE,

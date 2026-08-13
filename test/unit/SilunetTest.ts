@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { LamportClock } from '../../src/lamport';
 import { Mutex } from '../../src/mutex';
+import { classicRoundSeconds } from '../../src/game';
 import {
   DIFFICULTIES,
   DIFFICULTY_LABEL,
@@ -97,6 +98,15 @@ describe('Candado del marcador', () => {
 
 // getRandomRounds() elige las palabras de una partida del modo Clásico.
 describe('Armado de una partida', () => {
+
+  test('el modo clásico reduce progresivamente el tiempo hasta cinco segundos', () => {
+    const tiempos = Array.from({ length: MAX_ROUNDS }, (_, wordsPassed) =>
+      classicRoundSeconds(wordsPassed),
+    );
+
+    assert.deepEqual(tiempos, [25, 22, 19, 16, 13, 10, 7, 5]);
+    assert.equal(classicRoundSeconds(MAX_ROUNDS), 5);
+  });
 
   test('una partida no supera el máximo de rondas ni repite palabras', () => {
     // Aunque se pidan 1000, el tope manda.

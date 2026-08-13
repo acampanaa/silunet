@@ -16,6 +16,11 @@
     'arrow-right': '<path d="m9 18 6-6-6-6"/>',
     'rotate-cw': '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
     'chevrons-down': '<path d="m7 7 5 5 5-5M7 13l5 5 5-5"/>',
+    // Controles de audio de la pantalla maestra.
+    music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    'music-off': '<path d="M9 18V9M9 5l12-2v6"/><circle cx="6" cy="18" r="3"/><path d="m3 3 18 18"/>',
+    volume: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/>',
+    'volume-off': '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="m22 9-6 6M16 9l6 6"/>',
   };
 
   function safeClassName(value = '') {

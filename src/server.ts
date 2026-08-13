@@ -8,13 +8,15 @@ import { Game }          from './game';
 import { Cluster }       from './cluster';
 import { Store, normalizeAvatarId, PersistenceStore } from './db';
 import { PostgresStore } from './postgres';
-import { S2C, C2S, N2N, GameOverResult } from './types';
+import { S2C, C2S, N2N, GameOverResult, P2PPeerDescriptor } from './types';
 
 // ── Configuración por instancia ───────────────────────────────────────────────
 const NODE_ID        = process.env.NODE_ID        ?? 'node1';
 const PORT           = parseInt(process.env.PORT  ?? '3001', 10);
 const COORDINATOR_ID = process.env.COORDINATOR_ID ?? 'node1';
 const PEER_URLS      = (process.env.PEERS ?? '').split(',').filter(Boolean);
+const PUBLIC_NODE_URLS = (process.env.PUBLIC_NODES ?? '').split(',').map(url => url.trim()).filter(Boolean);
+const MAX_PLAYERS = 5;
 
 // El Game corre en todos los nodos pero solo el coordinador lo controla.
 // El reloj Lamport es compartido entre game y cluster (mismo objeto).
@@ -29,6 +31,8 @@ const ALLOW_SQLITE_CLUSTER = process.env.ALLOW_SQLITE_CLUSTER === '1';
 const store: PersistenceStore = DATABASE_URL
   ? new PostgresStore(DATABASE_URL, NODE_ID)
   : new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
+let persistenceInitialized = false;
+let persistenceLeader = false;
 
 if (!DATABASE_URL && PEER_URLS.length > 0 && ALLOW_SQLITE_CLUSTER) {
   console.warn(`[${NODE_ID}] [WARN] DATABASE_URL ausente: SQLite es solo para desarrollo; el historial NO será consistente entre nodos.`);
@@ -50,6 +54,8 @@ const MIME: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif':  'image/gif',
   '.woff2': 'font/woff2',
+  '.mp3':  'audio/mpeg',
+  '.ogg':  'audio/ogg',
 };
 
 function getLocalIP(): string {
@@ -70,9 +76,10 @@ function getLocalIP(): string {
 // perdió la elección Bully) pueda reconectarse solo por cualquier otro nodo vivo,
 // sin perder su sesión ni su puntaje de la partida en curso.
 function siblingNodeUrls(): string[] {
-  const self      = `http://${getLocalIP()}:${PORT}`;
-  const siblings  = PEER_URLS.map(u => u.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
-  return [self, ...siblings];
+  const self = `http://${getLocalIP()}:${PORT}`;
+  const configured = PUBLIC_NODE_URLS.length > 0 ? PUBLIC_NODE_URLS : PEER_URLS;
+  const siblings = configured.map(u => u.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
+  return [...new Set([self, ...siblings])];
 }
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -112,6 +119,8 @@ const httpServer = http.createServer((req, res) => {
       isCoordinator: cluster.isCoordinator,
       coordinator:   cluster.coordinatorId,
       connectedPeers: cluster.getConnectedPeers(),
+      persistenceReady: persistenceInitialized,
+      persistenceLeader,
       // Réplica local (Eje 3): permite comparar seguidor vs coordinador
       phase:         game.getPhase(),
       round:         game.getCurrentRoundInfo(),
@@ -157,6 +166,10 @@ interface ClientMeta {
   playerId?: string;
   role: 'player' | 'master' | 'unknown';
   lastSeen?: number; // Eje 4: último heartbeat recibido de este cliente
+  joinInFlight?: boolean;
+  p2pPeerId?: string;
+  p2pRole?: 'player' | 'master';
+  p2pNick?: string;
 }
 
 const clients = new Map<WebSocket, ClientMeta>();
@@ -189,6 +202,50 @@ function sendToLocalPlayer(playerId: string, msg: S2C): boolean {
   return false;
 }
 
+function p2pRoster(): P2PPeerDescriptor[] {
+  const peers: P2PPeerDescriptor[] = [];
+  for (const [ws, meta] of clients) {
+    if (!meta.p2pPeerId || !meta.p2pRole || ws.readyState !== WebSocket.OPEN) continue;
+    peers.push({
+      peerId: meta.p2pPeerId,
+      role: meta.p2pRole,
+      playerId: meta.playerId,
+      nick: meta.p2pNick,
+    });
+  }
+  return peers.sort((a, b) => a.peerId.localeCompare(b.peerId));
+}
+
+function broadcastP2PRoster(): void {
+  const peers = p2pRoster();
+  for (const [ws, meta] of clients) {
+    if (!meta.p2pPeerId || ws.readyState !== WebSocket.OPEN) continue;
+    send(ws, { type: 'P2P_PEERS', selfId: meta.p2pPeerId, peers });
+  }
+}
+
+function sendP2PRoster(ws: WebSocket, meta: ClientMeta): void {
+  if (!meta.p2pPeerId || ws.readyState !== WebSocket.OPEN) return;
+  send(ws, { type: 'P2P_PEERS', selfId: meta.p2pPeerId, peers: p2pRoster() });
+}
+
+let p2pSnapshotRevision = 0;
+function sendP2PSnapshot(ws: WebSocket): void {
+  send(ws, { type: 'P2P_SNAPSHOT', revision: p2pSnapshotRevision, snapshot: game.snapshot() });
+}
+
+function broadcastP2PSnapshot(): void {
+  p2pSnapshotRevision++;
+  const payload: S2C = {
+    type: 'P2P_SNAPSHOT',
+    revision: p2pSnapshotRevision,
+    snapshot: game.snapshot(),
+  };
+  for (const [ws, meta] of clients) {
+    if (meta.p2pPeerId && ws.readyState === WebSocket.OPEN) send(ws, payload);
+  }
+}
+
 // Eje 4: empuja la salud del clúster a las pantallas maestras locales (sin polling).
 function sendClusterState() {
   const { nodes, electionInProgress } = cluster.clusterState();
@@ -218,6 +275,7 @@ game.on('broadcast', (msg: S2C) => {
       lamport:  game.clock.tick(),
     });
   }
+  broadcastP2PSnapshot();
 });
 
 // Los cambios privados (como usar una pista) no se difunden a todos los
@@ -229,6 +287,7 @@ game.on('state_changed', () => {
     snapshot: game.snapshot(),
     lamport:  game.clock.tick(),
   });
+  broadcastP2PSnapshot();
 });
 
 function hintPayload(playerId: string): S2C {
@@ -256,19 +315,35 @@ function parseCustomAvatar(dataUrl: string): Buffer | null {
 // cuando no hay una partida en curso con ese token se consulta o crea la
 // identidad persistente en la fuente compartida.
 async function resolveJoin(playerId: string, nick: string, token: string | null, originNode: string, avatarId?: number) {
+  // Un celular reintenta JOIN mientras termina la elección. Si el primer
+  // intento ya creó esta sesión, responder con ella en lugar de reiniciar su
+  // jugador o tocar nuevamente la base.
+  const activeSession = game.getPlayer(playerId);
+  if (activeSession?.token) {
+    return {
+      player: activeSession,
+      token: activeSession.token,
+      returning: true,
+      reconnected: true,
+      avatarId: activeSession.avatarId ?? 0,
+      avatarKey: activeSession.avatarKey,
+    };
+  }
   if (token && game.wasConnected(token)) {
-    // La partida en vivo se retoma desde memoria (arriba), pero el nick/avatar
-    // que trae el celular sí hay que persistirlos: si no, el perfil seguiría
-    // mostrando los anteriores y no coincidiría con lo que se ve en el ranking.
-    // No-op si la identidad todavía no existe (compatibilidad con clientes viejos).
-    await store.updateIdentity(token, nick, avatarId);
     const player = game.addPlayer(playerId, nick, token, originNode, avatarId);
+    // La reconexión en vivo nunca espera a PostgreSQL. El jugador recupera su
+    // puntaje desde la réplica y la identidad se sincroniza en segundo plano.
+    void Promise.resolve(store.updateIdentity(token, nick, avatarId)).catch(error => {
+      console.warn(`[${NODE_ID}] Identidad ${token} pendiente de sincronizar:`, error);
+    });
     return { player, token, returning: true, reconnected: true, avatarId: player.avatarId ?? 0, avatarKey: player.avatarKey };
   }
   const id     = await store.findOrCreatePlayer(token, nick, avatarId);
   const player = game.addPlayer(playerId, id.nick, id.token, originNode, id.avatarId, id.avatarKey);
   return { player, token: id.token, returning: id.returning, reconnected: false, avatarId: id.avatarId, avatarKey: id.avatarKey };
 }
+
+const forwardedJoinsInFlight = new Set<string>();
 
 // ── v2: persistencia al cerrar la partida (Paso 3) ───────────────────────────
 // Game emite 'game_over' en el nodo que controla la partida. Solo el COORDINADOR
@@ -278,7 +353,7 @@ let persistenceRetryRunning = false;
 
 async function persistGameResult(result: GameOverResult): Promise<void> {
   pendingGameResults.set(result.gameId, result);
-  if (!cluster.isCoordinator) return;
+  if (!cluster.isCoordinator || !persistenceLeader) return;
   try {
     const saved = await store.saveGameResult(result);
     pendingGameResults.delete(result.gameId);
@@ -291,7 +366,7 @@ async function persistGameResult(result: GameOverResult): Promise<void> {
 game.on('game_over', (result: GameOverResult) => void persistGameResult(result));
 
 setInterval(async () => {
-  if (!cluster.isCoordinator || persistenceRetryRunning || pendingGameResults.size === 0) return;
+  if (!cluster.isCoordinator || !persistenceLeader || persistenceRetryRunning || pendingGameResults.size === 0) return;
   persistenceRetryRunning = true;
   try {
     for (const result of pendingGameResults.values()) await persistGameResult(result);
@@ -308,6 +383,21 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function ensurePersistenceInitialized(): Promise<boolean> {
+  if (persistenceInitialized) return true;
+  try {
+    await store.init();
+    persistenceInitialized = true;
+    console.log(`[${NODE_ID}] [OK] Persistencia ${store.mode} disponible`);
+    return true;
+  } catch (error) {
+    persistenceInitialized = false;
+    persistenceLeader = false;
+    console.error(`[${NODE_ID}] Persistencia temporalmente no disponible; el juego seguirá sin historial:`, error);
+    return false;
+  }
+}
+
 async function withExclusiveLeadershipOperation<T>(work: () => Promise<T>): Promise<T> {
   while (leadershipMaintenanceRunning) await delay(25);
   leadershipMaintenanceRunning = true;
@@ -320,13 +410,22 @@ async function withExclusiveLeadershipOperation<T>(work: () => Promise<T>): Prom
 
 async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): Promise<boolean> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (!cluster.isCoordinator) return false;
+    if (!cluster.isCoordinator) {
+      persistenceLeader = false;
+      return false;
+    }
     try {
+      if (!await ensurePersistenceInitialized()) {
+        if (attempt < attempts) await delay(LEADER_CLAIM_DELAY_MS);
+        continue;
+      }
       if (await store.claimLeadership()) {
+        persistenceLeader = true;
         console.log(`[${NODE_ID}] [OK] Concesión de escritura ${store.mode} adquirida`);
         return true;
       }
     } catch (error) {
+      persistenceLeader = false;
       console.error(`[${NODE_ID}] Error al solicitar la concesión de escritura:`, error);
     }
     if (attempt < attempts) await delay(LEADER_CLAIM_DELAY_MS);
@@ -335,14 +434,17 @@ async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): P
 }
 
 async function activateCoordinator(): Promise<void> {
-  console.log(`[${NODE_ID}] [COORDINATOR] Coordinador electo; validando la concesión de persistencia`);
-  const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
-  if (!acquired) {
-    console.error(`[${NODE_ID}] No se obtuvo la concesión de escritura; la partida no se reanudará todavía`);
-    return;
-  }
+  console.log(`[${NODE_ID}] [COORDINATOR] Coordinador electo; reanudando desde la réplica`);
+  // La partida en vivo depende de la elección entre nodos, no de la base
+  // histórica. Primero vuelve el reloj; PostgreSQL se recupera en paralelo.
   game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
   game.resume();
+  console.log(`[${NODE_ID}] [OK] Partida reanudada; recuperando persistencia en segundo plano`);
+
+  const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
+  if (!acquired) {
+    console.warn(`[${NODE_ID}] Sin concesión de escritura; la partida continúa y el resultado queda pendiente`);
+  }
 }
 
 setInterval(async () => {
@@ -350,12 +452,14 @@ setInterval(async () => {
   try {
     await withExclusiveLeadershipOperation(async () => {
       const renewed = await store.renewLeadership();
+      persistenceLeader = renewed;
       if (!renewed) {
         console.warn(`[${NODE_ID}] Se perdió la concesión de escritura; intentando recuperarla`);
         await acquirePersistenceLeadership(1);
       }
     });
   } catch (error) {
+    persistenceLeader = false;
     console.error(`[${NODE_ID}] No se pudo renovar la concesión de escritura:`, error);
   }
 }, 2000);
@@ -384,7 +488,15 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía JOIN de un jugador al coordinador
     case 'N_FORWARD_JOIN': {
       if (!cluster.isCoordinator) return;
-      const { player, token: playerToken, returning, reconnected, avatarId, avatarKey } = await resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode, msg.avatarId);
+      if (forwardedJoinsInFlight.has(msg.playerId)) return;
+      forwardedJoinsInFlight.add(msg.playerId);
+      let resolved;
+      try {
+        resolved = await resolveJoin(msg.playerId, msg.nick, msg.token, msg.originNode, msg.avatarId);
+      } finally {
+        forwardedJoinsInFlight.delete(msg.playerId);
+      }
+      const { player, token: playerToken, returning, reconnected, avatarId, avatarKey } = resolved;
       // WELCOME → solo al jugador que se unió, en su nodo de origen
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
@@ -445,6 +557,13 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     case 'N_FORWARD_START':
       if (!cluster.isCoordinator) return;
       game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
+      break;
+
+    // Seguidor reenvía el END_GAME del master
+    case 'N_FORWARD_END_GAME':
+      if (!cluster.isCoordinator) return;
+      game.clock.update(msg.lamport);
+      game.endGameNow();
       break;
 
     case 'N_FORWARD_STACK_ACTION':
@@ -568,7 +687,10 @@ cluster.on('peer_disconnected', () => {
 
 // Eje 4: este nodo ganó la elección Bully → asume el control de la partida.
 cluster.on('became_coordinator', () => void activateCoordinator());
-cluster.on('coordinator_changed', (id: string) => console.log(`[${NODE_ID}] Coordinador actual: ${id}`));
+cluster.on('coordinator_changed', (id: string) => {
+  if (id !== NODE_ID) persistenceLeader = false;
+  console.log(`[${NODE_ID}] Coordinador actual: ${id}`);
+});
 
 // Eje 4: cualquier cambio de topología o de coordinador se empuja al master.
 // election_started avisa el arranque de una elección Bully (panel didáctico);
@@ -610,12 +732,32 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     try {
     switch (msg.type) {
 
+      case 'PING': {
+        // Un corte fisico de Wi-Fi puede dejar el WebSocket del navegador en
+        // OPEN durante minutos. El PONG permite que el cliente detecte ese
+        // socket fantasma con un timeout corto y active el failover P2P.
+        send(ws, { type: 'PONG', ts: Date.now() });
+        // Tambien repara carreras de senalizacion: si un DataChannel inicial
+        // fallo, el siguiente roster permite reconstruirlo sin recargar.
+        sendP2PRoster(ws, client);
+        break;
+      }
+
       case 'JOIN': {
+        if (client.joinInFlight) return;
+        client.joinInFlight = true;
+        try {
         const nick = (msg.nick ?? '').trim().slice(0, 20);
         if (!nick) { send(ws, { type: 'ERROR', message: 'Nick inválido' }); return; }
 
-        const playerId = genConnId();
         const token    = msg.token ?? null; // v2: identidad persistente del celular
+        const existingSession = client.playerId ? game.getPlayer(client.playerId) : undefined;
+        const reconnecting = !!(token && game.wasConnected(token));
+        if (!existingSession && !reconnecting && game.getPlayerCount() >= MAX_PLAYERS) {
+          send(ws, { type: 'ERROR', message: `Sala llena: máximo ${MAX_PLAYERS} jugadores para garantizar el failover P2P.` });
+          return;
+        }
+        const playerId = client.playerId ?? genConnId();
         client.playerId = playerId;
         client.role     = 'player';
 
@@ -637,6 +779,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             originNode: NODE_ID,
             lamport:    game.clock.tick(),
           });
+        }
+        } finally {
+          client.joinInFlight = false;
         }
         break;
       }
@@ -738,6 +883,35 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         break;
       }
 
+      case 'P2P_REGISTER': {
+        if (!/^[A-Za-z0-9_-]{8,80}$/.test(msg.peerId)) return;
+        if (msg.role === 'player' && (!client.playerId || client.role !== 'player')) return;
+        if (msg.role === 'master' && client.role !== 'master') return;
+        const duplicate = [...clients.entries()].find(([otherWs, meta]) =>
+          otherWs !== ws && meta.p2pPeerId === msg.peerId && otherWs.readyState === WebSocket.OPEN
+        );
+        if (duplicate) {
+          send(ws, { type: 'ERROR', message: 'Identidad P2P duplicada. Recarga la página.' });
+          return;
+        }
+        client.p2pPeerId = msg.peerId;
+        client.p2pRole = msg.role;
+        client.p2pNick = msg.nick?.trim().slice(0, 20);
+        broadcastP2PRoster();
+        sendP2PSnapshot(ws);
+        break;
+      }
+
+      case 'P2P_SIGNAL': {
+        if (!client.p2pPeerId) return;
+        for (const [targetWs, targetMeta] of clients) {
+          if (targetMeta.p2pPeerId !== msg.target) continue;
+          send(targetWs, { type: 'P2P_SIGNAL', source: client.p2pPeerId, data: msg.data });
+          break;
+        }
+        break;
+      }
+
       case 'GUESS': {
         if (!client.playerId) return;
         if (cluster.isCoordinator) {
@@ -801,6 +975,21 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             totalRounds: msg.totalRounds ?? 8,
             mode:       msg.mode ?? 'clasico',
             lamport:    game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      // El master corta la partida antes de tiempo. Mismo camino que START_GAME:
+      // si este nodo no es el coordinador, se reenvía y decide allá.
+      case 'END_GAME': {
+        if (client.role !== 'master') return;
+        if (cluster.isCoordinator) {
+          game.endGameNow();
+        } else {
+          cluster.sendToCoordinator({
+            type:    'N_FORWARD_END_GAME',
+            lamport: game.clock.tick(),
           });
         }
         break;
@@ -889,7 +1078,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         });
       }
     }
+    const hadP2PIdentity = !!client?.p2pPeerId;
     clients.delete(ws);
+    if (hadP2PIdentity) broadcastP2PRoster();
   });
 });
 
@@ -913,11 +1104,14 @@ async function bootstrap(): Promise<void> {
   if (!DATABASE_URL && PEER_URLS.length > 0 && !ALLOW_SQLITE_CLUSTER) {
     throw new Error('Un clúster requiere DATABASE_URL compartida. ALLOW_SQLITE_CLUSTER=1 se reserva para V&V local.');
   }
-  await store.init();
-  const acquired = !cluster.isCoordinator
-    || await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
-  if (!acquired) {
-    throw new Error('El coordinador inicial no pudo adquirir la concesión de persistencia');
+  const initialized = await ensurePersistenceInitialized();
+  if (cluster.isCoordinator && initialized) {
+    const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
+    if (!acquired) {
+      console.warn(`[${NODE_ID}] El coordinador inicial arrancará sin persistencia; se recuperará automáticamente`);
+    }
+  } else if (cluster.isCoordinator) {
+    console.warn(`[${NODE_ID}] El coordinador inicial arrancará sin PostgreSQL; el juego permanece disponible`);
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {

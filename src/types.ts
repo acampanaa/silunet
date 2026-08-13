@@ -121,6 +121,7 @@ export interface FinalStanding {
 
 export interface GameOverResult {
   gameId: string;
+  mode: GameMode;
   totalRounds: number;
   standings: FinalStanding[];
 }
@@ -152,17 +153,29 @@ export interface HallOfFameEntry {
   avatarId: number;
   avatarKey?: string;
   partidasJugadas: number;
+  partidasGanadas: number;
   puntosAcumulados: number;
   oro: number;
   plata: number;
   bronce: number;
 }
 
+export interface RecentGamePlayer {
+  nick: string;
+  avatarId: number;
+  avatarKey?: string;
+  puntos: number;
+  puesto: number;
+  medalla: 'oro' | 'plata' | 'bronce' | null;
+}
+
 export interface RecentGame {
   nombre: string;
   jugadaEn: string;
+  modo: GameMode;
   totalRondas: number;
   ganador: string | null;
+  jugadores: RecentGamePlayer[];
 }
 
 // Snapshot completo del estado autoritativo del juego.
@@ -188,6 +201,13 @@ export interface GameSnapshot {
   sharedClock: number;
   cleared: number;
   stack: StackState | null;
+}
+
+export interface P2PPeerDescriptor {
+  peerId: string;
+  role: 'player' | 'master';
+  playerId?: string;
+  nick?: string;
 }
 
 // Mensajes servidor → cliente
@@ -246,6 +266,12 @@ export type S2C =
   // Eje 3: evento puntual de la cola del candado (para el log en vivo del
   // panel didáctico) — se emite justo cuando un acierto tiene que esperar.
   | { type: 'MUTEX_QUEUED'; waiting: number }
+  // El servidor solo presenta navegadores y entrega la última réplica. Una vez
+  // abiertos los DataChannels, estos mensajes dejan de ser necesarios.
+  | { type: 'P2P_PEERS'; selfId: string; peers: P2PPeerDescriptor[] }
+  | { type: 'P2P_SIGNAL'; source: string; data: unknown }
+  | { type: 'P2P_SNAPSHOT'; revision: number; snapshot: GameSnapshot }
+  | { type: 'PONG'; ts: number }
   | { type: 'ERROR'; message: string };
 
 // Mensajes nodo → nodo (inter-cluster)
@@ -265,6 +291,7 @@ export type N2N =
   | { type: 'N_FORWARD_GUESS'; playerId: string; word: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_HINT';  playerId: string; originNode: string; lamport: number }
   | { type: 'N_FORWARD_START'; totalRounds: number; mode: GameMode; lamport: number }
+  | { type: 'N_FORWARD_END_GAME'; lamport: number }
   | { type: 'N_FORWARD_STACK_ACTION'; playerId: string; action: StackAction; originNode: string; lamport: number }
   // Votación de categoría: seguidor reenvía el voto de su jugador al coordinador
   | { type: 'N_FORWARD_VOTE';  playerId: string; kind: 'category' | 'difficulty'; option: string; originNode: string; lamport: number }
@@ -286,9 +313,12 @@ export type C2S =
   | { type: 'GUESS'; word: string; lamport: number }
   | { type: 'REQUEST_HINT' }
   | { type: 'START_GAME'; totalRounds?: number; mode?: GameMode }
+  | { type: 'END_GAME' }  // el master corta la partida antes de tiempo
   | { type: 'STACK_ACTION'; action: StackAction }
   // Voto de categoría o de dificultad — uno de cada por jugador, se puede cambiar
   | { type: 'CAST_VOTE'; kind: 'category' | 'difficulty'; option: string }
   | { type: 'GET_PROFILE'; token: string }  // v2: el celular pide su perfil persistente
   | { type: 'GET_HALL_OF_FAME' }  // v2.1: el master pide el salón de la fama
+  | { type: 'P2P_REGISTER'; peerId: string; role: 'player' | 'master'; playerId?: string; nick?: string }
+  | { type: 'P2P_SIGNAL'; target: string; data: unknown }
   | { type: 'PING'; l?: number };  // Eje 4: latido del celular al servidor

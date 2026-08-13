@@ -106,6 +106,7 @@ export class Store implements PersistenceStore {
       CREATE TABLE IF NOT EXISTS partidas (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre       TEXT NOT NULL,
+        modo         TEXT NOT NULL DEFAULT 'clasico',
         total_rondas INTEGER NOT NULL,
         jugada_en    TEXT NOT NULL
       );
@@ -128,6 +129,7 @@ export class Store implements PersistenceStore {
     this.addColumnIfMissing('jugadores', 'avatar_key', 'TEXT');
     this.addColumnIfMissing('jugadores', 'avatar_mime', 'TEXT');
     this.addColumnIfMissing('jugadores', 'avatar_data', 'BLOB');
+    this.addColumnIfMissing('partidas', 'modo', "TEXT NOT NULL DEFAULT 'clasico'");
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS jugadores_avatar_key_idx ON jugadores (avatar_key)');
   }
 
@@ -227,10 +229,10 @@ export class Store implements PersistenceStore {
   }
 
   /** Registra una partida cerrada y devuelve su id (para las participaciones). */
-  createPartida(nombre: string, totalRondas: number): number {
+  createPartida(nombre: string, totalRondas: number, modo: GameOverResult['mode']): number {
     const info = this.db
-      .prepare('INSERT INTO partidas (nombre, total_rondas, jugada_en) VALUES (?, ?, ?)')
-      .run(nombre, totalRondas, new Date().toISOString());
+      .prepare('INSERT INTO partidas (nombre, modo, total_rondas, jugada_en) VALUES (?, ?, ?, ?)')
+      .run(nombre, modo, totalRondas, new Date().toISOString());
     return Number(info.lastInsertRowid);
   }
 
@@ -252,7 +254,7 @@ export class Store implements PersistenceStore {
   saveGameResult(result: GameOverResult): SavedGame {
     const number = this.countPartidas() + 1;
     const name = `Casa Abierta #${number}`;
-    const partidaId = this.createPartida(name, result.totalRounds);
+    const partidaId = this.createPartida(name, result.totalRounds, result.mode);
     let savedPlayers = 0;
     for (const standing of result.standings) {
       if (!standing.token) continue;
@@ -328,6 +330,7 @@ export class Store implements PersistenceStore {
            j.avatar_id                                                  AS avatarId,
            j.avatar_key                                                 AS avatarKey,
            COUNT(*)                                                     AS partidasJugadas,
+           COALESCE(SUM(CASE WHEN pt.puesto = 1 THEN 1 ELSE 0 END), 0)  AS partidasGanadas,
            COALESCE(SUM(pt.puntos), 0)                                  AS puntosAcumulados,
            COALESCE(SUM(CASE WHEN pt.medalla = 'oro'    THEN 1 ELSE 0 END), 0) AS oro,
            COALESCE(SUM(CASE WHEN pt.medalla = 'plata'  THEN 1 ELSE 0 END), 0) AS plata,
@@ -343,11 +346,13 @@ export class Store implements PersistenceStore {
 
   /** Últimas partidas jugadas (Casa Abierta #N), con quién ganó cada una. */
   getRecentGames(limit = 6): RecentGame[] {
-    return this.db
+    const games = this.db
       .prepare(
         `SELECT
+           pa.id                                AS id,
            pa.nombre                            AS nombre,
            pa.jugada_en                         AS jugadaEn,
+           pa.modo                              AS modo,
            pa.total_rondas                      AS totalRondas,
            (SELECT j.nick FROM participaciones pt
               JOIN jugadores j ON j.id = pt.jugador_id
@@ -357,7 +362,50 @@ export class Store implements PersistenceStore {
          ORDER BY pa.id DESC
          LIMIT ?`,
       )
-      .all(limit) as unknown as RecentGame[];
+      .all(limit) as Array<{
+        id: number;
+        nombre: string;
+        jugadaEn: string;
+        modo: RecentGame['modo'];
+        totalRondas: number;
+        ganador: string | null;
+      }>;
+
+    const participants = this.db.prepare(
+      `SELECT
+         j.nick                  AS nick,
+         j.avatar_id             AS avatarId,
+         j.avatar_key            AS avatarKey,
+         pt.puntos               AS puntos,
+         pt.puesto               AS puesto,
+         pt.medalla              AS medalla
+       FROM participaciones pt
+       JOIN jugadores j ON j.id = pt.jugador_id
+       WHERE pt.partida_id = ?
+       ORDER BY pt.puesto ASC`,
+    );
+
+    return games.map(game => {
+      const jugadores = participants.all(game.id) as Array<{
+        nick: string;
+        avatarId: number;
+        avatarKey: string | null;
+        puntos: number;
+        puesto: number;
+        medalla: 'oro' | 'plata' | 'bronce' | null;
+      }>;
+      return {
+        nombre: game.nombre,
+        jugadaEn: game.jugadaEn,
+        modo: game.modo,
+        totalRondas: game.totalRondas,
+        ganador: game.ganador,
+        jugadores: jugadores.map(player => ({
+          ...player,
+          avatarKey: player.avatarKey ?? undefined,
+        })),
+      };
+    });
   }
 
   close(): void {

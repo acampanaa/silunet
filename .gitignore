@@ -6,11 +6,10 @@ data/
 *.db-journal
 *.db-wal
 
-reports/selenium/*
-!reports/selenium/.gitkeep
-reports/unit/*
-!reports/unit/.gitkeep
+# Resultados regenerables de pruebas y cobertura.
+reports/
 coverage/
 target/
-reports/junit/*
-!reports/junit/.gitkeep
+
+# Documento externo usado como referencia local durante la adaptación P2P.
+/README-REPLICAR-P2P.md

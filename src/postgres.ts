@@ -241,17 +241,18 @@ export class PostgresStore implements PersistenceStore {
       }
 
       await client.query(
-        `INSERT INTO partidas (id, nombre, total_rondas)
-         VALUES ($1::uuid, 'Casa Abierta', $2)
+        `INSERT INTO partidas (id, nombre, modo, total_rondas)
+         VALUES ($1::uuid, 'Casa Abierta', $2, $3)
          ON CONFLICT (id) DO NOTHING`,
-        [result.gameId, result.totalRounds],
+        [result.gameId, result.mode, result.totalRounds],
       );
       const gameRow = await client.query<{ numero: string; nombre: string }>(
         `UPDATE partidas
-            SET nombre = 'Casa Abierta #' || numero::text
+            SET nombre = 'Casa Abierta #' || numero::text,
+                modo = $2
           WHERE id = $1::uuid
         RETURNING numero::text, nombre`,
-        [result.gameId],
+        [result.gameId, result.mode],
       );
       if (gameRow.rowCount !== 1) throw new Error('No se pudo confirmar la partida en PostgreSQL');
 
@@ -328,10 +329,11 @@ export class PostgresStore implements PersistenceStore {
   async getHallOfFame(limit = 10): Promise<HallOfFameEntry[]> {
     const result = await this.pool.query<{
       nick: string; avatar_id: number; avatar_key: string | null; partidas_jugadas: string; puntos_acumulados: string;
-      oro: string; plata: string; bronce: string;
+      partidas_ganadas: string; oro: string; plata: string; bronce: string;
     }>(
       `SELECT j.nick, j.avatar_id, j.avatar_key::text,
               COUNT(*)::text AS partidas_jugadas,
+              COUNT(*) FILTER (WHERE pt.puesto = 1)::text AS partidas_ganadas,
               COALESCE(SUM(pt.puntos), 0)::text AS puntos_acumulados,
               COUNT(*) FILTER (WHERE pt.medalla = 'oro')::text AS oro,
               COUNT(*) FILTER (WHERE pt.medalla = 'plata')::text AS plata,
@@ -348,6 +350,7 @@ export class PostgresStore implements PersistenceStore {
       avatarId: row.avatar_id,
       avatarKey: row.avatar_key ?? undefined,
       partidasJugadas: Number(row.partidas_jugadas),
+      partidasGanadas: Number(row.partidas_ganadas),
       puntosAcumulados: Number(row.puntos_acumulados),
       oro: Number(row.oro),
       plata: Number(row.plata),
@@ -357,9 +360,10 @@ export class PostgresStore implements PersistenceStore {
 
   async getRecentGames(limit = 6): Promise<RecentGame[]> {
     const result = await this.pool.query<{
-      nombre: string; jugada_en: Date; total_rondas: number; ganador: string | null;
+      id: string; nombre: string; jugada_en: Date; modo: RecentGame['modo'];
+      total_rondas: number; ganador: string | null;
     }>(
-      `SELECT pa.nombre, pa.jugada_en, pa.total_rondas,
+      `SELECT pa.id::text, pa.nombre, pa.jugada_en, pa.modo, pa.total_rondas,
               winner.nick AS ganador
          FROM partidas pa
          LEFT JOIN participaciones first_place
@@ -369,11 +373,48 @@ export class PostgresStore implements PersistenceStore {
         LIMIT $1`,
       [cleanLimit(limit, 100)],
     );
+    if (result.rows.length === 0) return [];
+
+    const ids = result.rows.map(row => row.id);
+    const participants = await this.pool.query<{
+      partida_id: string;
+      nick: string;
+      avatar_id: number;
+      avatar_key: string | null;
+      puntos: number;
+      puesto: number;
+      medalla: 'oro' | 'plata' | 'bronce' | null;
+    }>(
+      `SELECT pt.partida_id::text, j.nick, j.avatar_id, j.avatar_key::text,
+              pt.puntos, pt.puesto, pt.medalla
+         FROM participaciones pt
+         JOIN jugadores j ON j.token = pt.jugador_token
+        WHERE pt.partida_id = ANY($1::uuid[])
+        ORDER BY pt.partida_id, pt.puesto ASC`,
+      [ids],
+    );
+
+    const playersByGame = new Map<string, RecentGame['jugadores']>();
+    for (const player of participants.rows) {
+      const list = playersByGame.get(player.partida_id) ?? [];
+      list.push({
+        nick: player.nick,
+        avatarId: player.avatar_id,
+        avatarKey: player.avatar_key ?? undefined,
+        puntos: player.puntos,
+        puesto: player.puesto,
+        medalla: player.medalla,
+      });
+      playersByGame.set(player.partida_id, list);
+    }
+
     return result.rows.map(row => ({
       nombre: row.nombre,
       jugadaEn: row.jugada_en.toISOString(),
+      modo: row.modo,
       totalRondas: row.total_rondas,
       ganador: row.ganador,
+      jugadores: playersByGame.get(row.id) ?? [],
     }));
   }
 

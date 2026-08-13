@@ -331,6 +331,57 @@
     .ctrl-btns { display: flex; gap: 10px; }
 
     /* Selector de modos: dock compacto que se abre como una baraja arcade. */
+    /* Controles de audio: discretos, del tamaño justo para pulsarlos sin mirar.
+       Silenciado se marca con color apagado y una barra tachada en el icono. */
+    .audio-controles { display: flex; gap: 8px; margin-left: auto; }
+    .btn-audio {
+      width: 40px; height: 40px;
+      display: grid; place-items: center;
+      border: 1px solid rgba(34,211,238,.28); border-radius: 10px;
+      background: rgba(34,211,238,.06);
+      color: var(--secondary);
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+    }
+    .btn-audio .ico { width: 19px; height: 19px; }
+    .btn-audio:hover { border-color: var(--secondary); background: rgba(34,211,238,.15); }
+    .btn-audio:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+    .btn-audio[aria-pressed="true"] {
+      border-color: rgba(107,114,128,.4);
+      background: rgba(107,114,128,.1);
+      color: var(--text-faint);
+    }
+
+    /* Terminar partida: acción destructiva, así que se mantiene discreta hasta
+       que se la pulsa. Al confirmar se tiñe de rojo para que no haya dudas de
+       lo que está por pasar. */
+    .btn-terminar {
+      margin-left: 12px; margin-right: 12px;
+      padding: 9px 15px; min-height: 40px;
+      border: 1px solid rgba(239, 68, 68, .35); border-radius: 10px;
+      background: rgba(239, 68, 68, .07);
+      color: var(--text-dim);
+      font: 600 .72rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: .08em;
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+    }
+    .btn-terminar:hover { border-color: var(--error); color: var(--text); background: rgba(239,68,68,.14); }
+    .btn-terminar:focus-visible { outline: 2px solid var(--error); outline-offset: 2px; }
+    .btn-terminar[hidden] { display: none; }
+    .btn-terminar.confirmando {
+      border-color: var(--error); color: #fff;
+      background: rgba(239, 68, 68, .28);
+      animation: latidoTerminar 1s ease-in-out infinite;
+    }
+    @keyframes latidoTerminar {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.35); }
+      50%      { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-terminar.confirmando { animation: none; }
+    }
+
     .mode-picker {
       --picker-ease: cubic-bezier(.2, 0, 0, 1);
       position: relative; z-index: 80;
@@ -427,6 +478,21 @@
     .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(2) { transition-delay: 45ms; }
     .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(3) { transition-delay: 85ms; }
     .mode-picker:is(:hover, :focus-within, .open) .mode-card:nth-child(4) { transition-delay: 125ms; }
+
+    /* Partida en curso: el mazo NO se despliega, ni por hover ni por foco.
+       Va después de las reglas de arriba a propósito: tienen la misma
+       especificidad, así que gana la que se declara al final. Sin esto el
+       panel seguía apareciendo sobre la partida proyectada aunque las
+       tarjetas estuvieran deshabilitadas. */
+    .mode-picker.locked .mode-deck {
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transform: translate3d(20px,18px,0) rotateX(-7deg) scale(.94);
+    }
+    .mode-picker.locked .mode-trigger-chevron { transform: none; }
+    .mode-picker.locked .mode-picker-trigger { cursor: not-allowed; }
+    .mode-picker.locked .mode-picker-trigger:hover {
+      border-color: rgba(163,230,53,.35); box-shadow: none;
+    }
 
     .mode-card-surface {
       --mx: 50%; --my: 50%; --rx: 0deg; --ry: 0deg;
@@ -542,9 +608,11 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .mode-picker-trigger::before { display:none; }
-      .mode-deck, .mode-card, .mode-card-surface, .mode-trigger-chevron, .stack-keyboard, .stack-keyboard kbd {
+      .mode-deck, .mode-card, .mode-card-surface, .mode-trigger-chevron, .stack-keyboard, .stack-keyboard kbd,
+      .waiting-reactive, .big-logo {
         transition-duration:.01ms !important; transform:none !important;
       }
+      .waiting-reactive::before { display:none; }
     }
 
     /* ── Modo Relajo: reloj comunitario ── */
@@ -657,11 +725,21 @@
     .phase-badge.gameEnd { background: rgba(251,191,36,0.15); color: var(--gold); }
 
     /* ── Waiting overlay ── */
-    #main-waiting { overflow: hidden; align-items: stretch !important; }
+    #main-waiting {
+      --waiting-mx: 50%; --waiting-my: 50%;
+      position: relative; overflow: hidden; align-items: stretch !important;
+    }
+    #main-waiting::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(circle 320px at var(--waiting-mx) var(--waiting-my), rgba(34,211,238,.075), transparent 72%);
+    }
     .waiting-center { display: flex; flex-direction: column; align-items: center; justify-content: center;
       flex: 1; width: min(100%, 760px); height: 100%; min-height: 0;
-      gap: clamp(8px, 1.35dvh, 16px); overflow: hidden; }
+      gap: clamp(8px, 1.35dvh, 16px); overflow: hidden;
+      position: relative; z-index: 1; perspective: 1100px; }
     .big-logo {
+      --logo-x: 0px; --logo-y: 0px;
       display: block;
       width: min(620px, 68vw);
       max-height: clamp(86px, 16dvh, 152px);
@@ -669,7 +747,44 @@
       object-fit: contain;
       flex-shrink: 1;
       filter: drop-shadow(0 0 34px rgba(240, 67, 155, 0.3));
+      transform: translate3d(var(--logo-x), var(--logo-y), 0);
+      transition: transform 160ms cubic-bezier(.2, 0, 0, 1), filter 180ms ease-out;
     }
+    #main-waiting:hover .big-logo {
+      filter: drop-shadow(0 0 40px rgba(240,67,155,.34)) drop-shadow(0 0 22px rgba(34,211,238,.12));
+    }
+    .waiting-reactive {
+      --reactive-accent: var(--secondary);
+      --reactive-mx: 50%; --reactive-my: 50%; --reactive-rx: 0deg; --reactive-ry: 0deg;
+      position: relative; overflow: hidden;
+      transform: perspective(950px) rotateX(var(--reactive-rx)) rotateY(var(--reactive-ry)) translateZ(0);
+      transform-style: preserve-3d; transform-origin: center; will-change: transform;
+      transition: transform 120ms ease-out, border-color 140ms ease-out, box-shadow 180ms ease-out;
+    }
+    .waiting-reactive::before {
+      content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(circle at var(--reactive-mx) var(--reactive-my),
+        color-mix(in srgb, var(--reactive-accent) 20%, transparent), transparent 44%);
+      transition: opacity 160ms ease-out;
+    }
+    .waiting-reactive::after {
+      content: ''; position: absolute; top: 0; left: 0; z-index: 0;
+      width: 68%; height: 2px; pointer-events: none;
+      background: linear-gradient(90deg, var(--reactive-accent), transparent);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--reactive-accent) 52%, transparent);
+      opacity: .72;
+    }
+    .waiting-reactive > * { position: relative; z-index: 1; }
+    .waiting-reactive:hover,
+    .waiting-reactive:focus-within {
+      border-color: color-mix(in srgb, var(--reactive-accent) 58%, transparent);
+      box-shadow: 0 18px 46px rgba(0,0,0,.4),
+        0 0 24px color-mix(in srgb, var(--reactive-accent) 13%, transparent);
+    }
+    .waiting-reactive:hover::before,
+    .waiting-reactive:focus-within::before { opacity: 1; }
+    .qr-block { --reactive-accent: var(--primary); }
+    .hof-block { --reactive-accent: var(--secondary); }
     .qr-block {
       display: flex; align-items: center; gap: 24px;
       background: var(--surface-glass); backdrop-filter: blur(16px);
@@ -689,13 +804,132 @@
 
     /* ── v2.1: Salón de la fama (histórico acumulado, no solo esta partida) ── */
     .hof-block {
-      display: flex; gap: 20px; margin-top: 4px;
+      display: flex; gap: 0; margin-top: 4px;
       background: var(--surface-glass); backdrop-filter: blur(14px);
       border: 1px solid rgba(34, 211, 238, 0.18); border-radius: 20px;
       padding: 18px 24px; width: 640px;
       flex: 0 1 220px; max-height: clamp(128px, 24dvh, 220px);
-      min-height: 0; overflow: hidden;
+      min-height: 0; overflow: hidden; perspective: 1200px;
+      transition: transform 120ms ease-out, border-color 140ms ease-out,
+        box-shadow 180ms ease-out, flex-basis 240ms ease-out, max-height 240ms ease-out;
     }
+    .hof-block.is-flipped {
+      --reactive-rx: 0deg !important; --reactive-ry: 0deg !important;
+      flex-basis: min(290px, 32dvh); max-height: clamp(210px, 32dvh, 290px);
+    }
+    .hof-flip {
+      position: relative; flex: 1; width: 100%; min-width: 0; min-height: 0;
+      transform-style: preserve-3d; transform-origin: center;
+      transition: transform 360ms cubic-bezier(.2, 0, 0, 1);
+    }
+    .hof-block.is-flipped .hof-flip { transform: rotateY(180deg); }
+    .hof-face {
+      position: absolute; inset: 0; min-width: 0; min-height: 0;
+      backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    }
+    .hof-front { display: flex; gap: 20px; }
+    .hof-back {
+      display: flex; flex-direction: column; gap: 10px;
+      transform: rotateY(180deg); pointer-events: none;
+    }
+    .hof-block.is-flipped .hof-front { pointer-events: none; }
+    .hof-block.is-flipped .hof-back { pointer-events: auto; }
+    .hof-back-header {
+      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .hof-back-btn {
+      width: 34px; height: 34px; flex: 0 0 auto;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(34,211,238,.35); border-radius: 9px;
+      background: rgba(34,211,238,.08); color: var(--secondary); cursor: pointer;
+      transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 90ms ease-out;
+    }
+    .hof-back-btn:hover { background: rgba(34,211,238,.16); border-color: var(--secondary); }
+    .hof-back-btn:active { transform: scale(.96); }
+    .hof-back-btn:focus-visible, .hof-row:focus-visible {
+      outline: 2px solid var(--secondary); outline-offset: 2px;
+    }
+    .hof-back-copy { min-width: 0; }
+    .hof-back-copy b {
+      display: block; color: #fff; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em;
+    }
+    .hof-back-copy span {
+      display: block; margin-top: 3px; color: var(--text-faint);
+      font: 600 .6rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em;
+    }
+    .hof-detail-scroll {
+      flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+      padding-right: 6px; scrollbar-width: thin; scrollbar-color: rgba(34,211,238,.52) transparent;
+    }
+    .hof-detail-scroll::-webkit-scrollbar { width: 6px; }
+    .hof-detail-scroll::-webkit-scrollbar-thumb { background: rgba(34,211,238,.45); border-radius: 999px; }
+    .hof-detail-hero { display: flex; align-items: center; gap: 12px; margin-bottom: 11px; }
+    .hof-detail-hero .avatar, .hof-detail-mark { flex: 0 0 auto; }
+    .hof-detail-mark {
+      width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(240,67,155,.42); border-radius: 13px 4px 13px 13px;
+      color: var(--primary); background: rgba(240,67,155,.1);
+      box-shadow: 0 0 18px rgba(240,67,155,.13);
+    }
+    .hof-detail-mark .ico { width: 25px; height: 25px; }
+    .hof-detail-heading { min-width: 0; }
+    .hof-detail-kicker {
+      display: block; color: var(--secondary); font: 700 .58rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: .12em;
+    }
+    .hof-detail-heading h3 {
+      margin-top: 5px; color: #fff; font-size: 1.05rem; line-height: 1.1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .hof-mode-pill {
+      display: inline-flex; margin-top: 6px; padding: 4px 7px;
+      border: 1px solid rgba(163,230,53,.36); border-radius: 5px;
+      color: var(--tertiary); background: rgba(163,230,53,.08);
+      font: 700 .56rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em;
+    }
+    .hof-stat-grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 7px; margin-bottom: 10px;
+    }
+    .hof-stat {
+      padding: 8px; border: 1px solid rgba(255,255,255,.07); border-radius: 9px;
+      background: rgba(7,9,21,.58); min-width: 0;
+    }
+    .hof-stat b {
+      display: block; color: #fff; font: 800 .9rem/1 var(--font-mono);
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .hof-stat span {
+      display: block; margin-top: 5px; color: var(--text-faint);
+      font: 650 .52rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .hof-medals {
+      display: flex; gap: 7px; flex-wrap: wrap; padding-top: 2px;
+    }
+    .hof-medal-chip {
+      display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px;
+      border: 1px solid rgba(255,255,255,.08); border-radius: 999px;
+      background: rgba(7,9,21,.58); color: var(--text-dim);
+      font: 700 .62rem/1 var(--font-mono);
+    }
+    .hof-medal-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .hof-medal-dot.gold { background: var(--gold); box-shadow: 0 0 8px rgba(251,191,36,.5); }
+    .hof-medal-dot.silver { background: #cbd5e1; }
+    .hof-medal-dot.bronze { background: #d97706; }
+    .hof-roster-title {
+      margin: 3px 0 7px; color: var(--text-faint);
+      font: 700 .58rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .1em;
+    }
+    .hof-roster { display: flex; flex-direction: column; gap: 5px; }
+    .hof-participant {
+      display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+      border: 1px solid rgba(255,255,255,.06); border-radius: 9px; background: rgba(7,9,21,.62);
+      font-size: .78rem;
+    }
+    .hof-participant .place { min-width: 22px; color: var(--text-faint); font: 700 .65rem/1 var(--font-mono); }
+    .hof-participant .nick { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hof-participant .score { color: var(--secondary); font: 700 .68rem/1 var(--font-mono); white-space: nowrap; }
+    .hof-participant.winner { border-color: rgba(251,191,36,.22); background: rgba(251,191,36,.055); }
     .hof-col { flex: 1; display: flex; flex-direction: column; gap: 8px;
       min-width: 0; min-height: 0; overflow: hidden; }
     .hof-title { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono);
@@ -713,8 +947,13 @@
     .hof-list::-webkit-scrollbar-thumb { background: rgba(34, 211, 238, 0.45); border-radius: 999px; }
     .hof-row {
       display: flex; align-items: center; gap: 8px;
-      background: var(--bg); border-radius: 10px; padding: 8px 12px; font-size: 0.85rem;
+      width: 100%; background: var(--bg); border: 1px solid transparent; border-radius: 10px;
+      padding: 8px 12px; color: var(--text); font: inherit; font-size: 0.85rem;
+      text-align: left; cursor: pointer;
+      transition: transform 120ms ease-out, border-color 120ms ease-out, background-color 120ms ease-out;
     }
+    .hof-row:hover { transform: translateX(3px); border-color: rgba(34,211,238,.3); background: #111122; }
+    .hof-row:active { transform: translateX(3px) scale(.99); }
     .hof-row .pos  { display: inline-flex; align-items: center; justify-content: center;
       color: var(--text-faint); min-width: 20px; }
     .hof-row .pos .ico { width: 1.15rem; height: 1.15rem; }
@@ -725,9 +964,23 @@
     }
     .hof-row .nick { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hof-row .pts  { font-family: var(--font-mono); color: var(--secondary); font-weight: 700; white-space: nowrap; }
+    .hof-row-arrow { display: inline-flex; color: var(--text-faint); }
+    .hof-row-arrow .ico { width: 14px; height: 14px; }
+    .hof-game-row { align-items: center; }
+    .hof-game-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .hof-game-copy small { color: var(--text-faint); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hof-winner { display: inline-flex; align-items: center; gap: 5px; }
     .hof-winner .ico { width: 0.9rem; height: 0.9rem; }
     .hof-empty { color: var(--text-faint); font-size: 0.8rem; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hof-flip { transform: none !important; transition: opacity 150ms ease-out; }
+      .hof-face { transform: none !important; backface-visibility: visible; -webkit-backface-visibility: visible; }
+      .hof-front { opacity: 1; pointer-events: auto; }
+      .hof-back { opacity: 0; pointer-events: none; }
+      .hof-block.is-flipped .hof-front { opacity: 0; pointer-events: none; }
+      .hof-block.is-flipped .hof-back { opacity: 1; pointer-events: auto; }
+    }
 
     /* La pantalla maestra debe caber en laptops, proyectores y ventanas con zoom. */
     @media (max-width: 920px) {
@@ -751,7 +1004,9 @@
       .mode-picker, .mode-picker-trigger { width:100%; }
       .mode-picker-trigger { min-width:0; }
       .mode-deck { right:-1px; width:calc(100vw - 24px); }
-      .hof-block { width:min(100%,640px); flex-direction:column; flex-basis:250px; max-height:min(32dvh,250px); }
+      .hof-block { width:min(100%,640px); flex-basis:250px; max-height:min(32dvh,250px); }
+      .hof-front { flex-direction:column; }
+      .hof-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .qr-block { max-width:100%; }
       .qr-url { overflow-wrap:anywhere; }
     }
@@ -768,6 +1023,7 @@
       #qr-canvas { padding:6px; }
       #qr-canvas > * { width:104px !important; height:104px !important; }
       .hof-block { flex-basis:160px; max-height:22dvh; padding:12px 16px; }
+      .hof-block.is-flipped { flex-basis:210px; max-height:29dvh; }
       .hof-row { padding:6px 9px; }
       .mode-deck { padding:10px; gap:8px; }
       .mode-deck-header { min-height:32px; }
@@ -783,6 +1039,7 @@
   <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
+  <script src="/p2p.js?v=20260813-offline-assets"></script>
 </head>
 <body>
 
@@ -846,7 +1103,7 @@
       PUCE Sede Manabí · Ingeniería de Software
     </p>
     <p style="color:#6b7280; font-size:1.1rem">Esperando jugadores...</p>
-    <div class="qr-block">
+    <div class="qr-block waiting-reactive">
       <div id="qr-canvas"></div>
       <div class="qr-info">
         <span class="qr-label">Escanea para unirte</span>
@@ -857,14 +1114,31 @@
     <p style="color:#22D3EE; font-size:1.6rem; font-weight:700; font-family:'JetBrains Mono',monospace" id="m-count">0 jugadores</p>
 
     <!-- v2.1: salón de la fama — histórico de TODAS las Casa Abierta jugadas -->
-    <div class="hof-block" id="hof-block" style="display:none;">
-      <div class="hof-col">
-        <p class="hof-title"><span data-silunet-icon="trophy"></span> Salón de la fama</p>
-        <div class="hof-list" id="hof-top"></div>
-      </div>
-      <div class="hof-col">
-        <p class="hof-title"><span data-silunet-icon="gamepad"></span> Últimas partidas</p>
-        <div class="hof-list" id="hof-recent"></div>
+    <div class="hof-block waiting-reactive" id="hof-block" style="display:none;">
+      <div class="hof-flip" id="hof-flip">
+        <div class="hof-face hof-front" id="hof-front">
+          <div class="hof-col">
+            <p class="hof-title"><span data-silunet-icon="trophy"></span> Salón de la fama</p>
+            <div class="hof-list" id="hof-top"></div>
+          </div>
+          <div class="hof-col">
+            <p class="hof-title"><span data-silunet-icon="gamepad"></span> Últimas partidas</p>
+            <div class="hof-list" id="hof-recent"></div>
+          </div>
+        </div>
+        <section class="hof-face hof-back" id="hof-back" aria-hidden="true" inert>
+          <div class="hof-back-header">
+            <button class="hof-back-btn" id="hof-back-btn" type="button"
+                    onclick="closeHallDetail()" aria-label="Volver al Salón de la Fama">
+              <span data-silunet-icon="arrow-left"></span>
+            </button>
+            <div class="hof-back-copy">
+              <b id="hof-back-title">Detalle histórico</b>
+              <span>Presiona volver o Escape</span>
+            </div>
+          </div>
+          <div class="hof-detail-scroll" id="hof-detail"></div>
+        </section>
       </div>
     </div>
   </div>
@@ -946,6 +1220,23 @@
     &nbsp;|&nbsp;
     Estado: <span class="phase-badge" id="f-phase">Esperando</span>
   </div>
+  <!-- Música de sala. Solo en la pantalla proyectada: si sonara también en los
+       celulares serían decenas de reproducciones desfasadas. -->
+  <audio id="musica-lobby" src="/music/lobby.mp3" loop preload="auto"></audio>
+
+  <div class="audio-controles">
+    <button class="btn-audio" id="btn-musica" type="button"
+            onclick="alternarMusica()" title="Música de sala"
+            aria-pressed="false"><span data-silunet-icon="music"></span></button>
+    <button class="btn-audio" id="btn-efectos" type="button"
+            onclick="alternarEfectos()" title="Efectos de sonido"
+            aria-pressed="false"><span data-silunet-icon="volume"></span></button>
+  </div>
+
+  <!-- Solo aparece con partida en curso. Pide confirmación porque termina la
+       partida para todo el público de golpe. -->
+  <button class="btn-terminar" id="btn-terminar" type="button" hidden
+          onclick="pedirTerminarPartida()">Terminar partida</button>
   <div class="mode-picker" id="mode-picker">
     <button class="mode-picker-trigger" id="mode-picker-trigger" type="button"
             aria-expanded="false" aria-controls="mode-deck" onclick="toggleModePicker(event)">
@@ -1098,33 +1389,165 @@
   }
 
   // ── v2.1: Salón de la fama ───────────────────────────────────────────────────
+  let hallTopEntries = [];
+  let hallRecentGames = [];
+  let hallReturnFocus = null;
+  let hallFlipTimer = null;
+
+  const hallModeLabels = {
+    clasico: 'Clásico',
+    relajo: 'Modo Relajo',
+    silustack: 'SiluStack',
+  };
+
+  function escapeHall(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+    })[char]);
+  }
+
+  function openHallDetail(title, content, trigger) {
+    const block = document.getElementById('hof-block');
+    const front = document.getElementById('hof-front');
+    const back = document.getElementById('hof-back');
+    clearTimeout(hallFlipTimer);
+    hallReturnFocus = trigger || null;
+    document.getElementById('hof-back-title').textContent = title;
+    document.getElementById('hof-detail').innerHTML = content;
+    front.inert = true;
+    back.inert = false;
+    front.setAttribute('aria-hidden', 'true');
+    back.setAttribute('aria-hidden', 'false');
+    block.classList.add('is-flipped');
+    hallFlipTimer = setTimeout(() => {
+      document.getElementById('hof-back-btn').focus({ preventScroll: true });
+    }, reducedMotion.matches ? 0 : 190);
+  }
+
+  function closeHallDetail(restoreFocus = true) {
+    const block = document.getElementById('hof-block');
+    const front = document.getElementById('hof-front');
+    const back = document.getElementById('hof-back');
+    if (!block.classList.contains('is-flipped')) return;
+    clearTimeout(hallFlipTimer);
+    block.classList.remove('is-flipped');
+    front.inert = false;
+    back.inert = true;
+    front.setAttribute('aria-hidden', 'false');
+    back.setAttribute('aria-hidden', 'true');
+    const target = hallReturnFocus;
+    hallReturnFocus = null;
+    if (restoreFocus && target && target.isConnected) {
+      hallFlipTimer = setTimeout(() => target.focus({ preventScroll: true }), reducedMotion.matches ? 0 : 190);
+    }
+  }
+
+  function showHallPlayerDetail(index, trigger) {
+    const entry = hallTopEntries[index];
+    if (!entry) return;
+    const played = Number(entry.partidasJugadas) || 0;
+    const wins = Number(entry.partidasGanadas) || 0;
+    const points = Number(entry.puntosAcumulados) || 0;
+    const average = played > 0 ? Math.round(points / played) : 0;
+    openHallDetail('Ficha de jugador', `
+      <div class="hof-detail-hero">
+        ${window.SilunetAvatars.avatarHTML(entry.avatarId, entry.avatarKey, '52px', '')}
+        <div class="hof-detail-heading">
+          <span class="hof-detail-kicker">Trayectoria histórica</span>
+          <h3>${escapeHall(entry.nick)}</h3>
+        </div>
+      </div>
+      <div class="hof-stat-grid">
+        <div class="hof-stat"><b>${points}</b><span>Puntos</span></div>
+        <div class="hof-stat"><b>${played}</b><span>Partidas</span></div>
+        <div class="hof-stat"><b>${wins}</b><span>Victorias</span></div>
+        <div class="hof-stat"><b>${average}</b><span>Promedio</span></div>
+      </div>
+      <div class="hof-medals" aria-label="Medallero">
+        <span class="hof-medal-chip"><i class="hof-medal-dot gold"></i> ${Number(entry.oro) || 0} oro</span>
+        <span class="hof-medal-chip"><i class="hof-medal-dot silver"></i> ${Number(entry.plata) || 0} plata</span>
+        <span class="hof-medal-chip"><i class="hof-medal-dot bronze"></i> ${Number(entry.bronce) || 0} bronce</span>
+      </div>
+    `, trigger);
+  }
+
+  function showHallGameDetail(index, trigger) {
+    const game = hallRecentGames[index];
+    if (!game) return;
+    const players = Array.isArray(game.jugadores) ? game.jugadores : [];
+    const mode = hallModeLabels[game.modo] || hallModeLabels.clasico;
+    const date = new Date(game.jugadaEn).toLocaleDateString('es', {
+      day: '2-digit', month: 'long', year: 'numeric',
+    });
+    const unit = game.modo === 'silustack' ? 'Piezas' : game.modo === 'relajo' ? 'Siluetas' : 'Rondas';
+    const roster = players.length
+      ? players.map((player, playerIndex) => `
+          <div class="hof-participant ${player.puesto === 1 ? 'winner' : ''}">
+            <span class="place">${player.puesto <= 3 ? ICON.medalNum(player.puesto, ['ico-gold','ico-silver','ico-bronze'][player.puesto - 1]) : '#' + player.puesto}</span>
+            ${window.SilunetAvatars.avatarHTML(player.avatarId, player.avatarKey, '22px', '')}
+            <span class="nick">${escapeHall(player.nick)}</span>
+            <span class="score">${Number(player.puntos) || 0} pts</span>
+          </div>
+        `).join('')
+      : '<p class="hof-empty">Esta partida antigua no tiene jugadores detallados.</p>';
+
+    openHallDetail('Detalle de Casa Abierta', `
+      <div class="hof-detail-hero">
+        <span class="hof-detail-mark">${ICON.gamepad()}</span>
+        <div class="hof-detail-heading">
+          <span class="hof-detail-kicker">${escapeHall(date)}</span>
+          <h3>${escapeHall(game.nombre)}</h3>
+          <span class="hof-mode-pill">${escapeHall(mode)}</span>
+        </div>
+      </div>
+      <div class="hof-stat-grid">
+        <div class="hof-stat"><b>${Number(game.totalRondas) || 0}</b><span>${unit}</span></div>
+        <div class="hof-stat"><b>${players.length}</b><span>Jugadores</span></div>
+        <div class="hof-stat"><b>${escapeHall(game.ganador || '—')}</b><span>Ganador</span></div>
+        <div class="hof-stat"><b>${escapeHall(mode)}</b><span>Modo</span></div>
+      </div>
+      <p class="hof-roster-title">Clasificación de la partida</p>
+      <div class="hof-roster">${roster}</div>
+    `, trigger);
+  }
+
   function handleHallOfFame(msg) {
     const block = document.getElementById('hof-block');
-    const top = msg.top || [];
-    const recent = msg.recentGames || [];
-    if (top.length === 0 && recent.length === 0) { block.style.display = 'none'; return; }
+    hallTopEntries = msg.top || [];
+    hallRecentGames = msg.recentGames || [];
+    closeHallDetail(false);
+    if (hallTopEntries.length === 0 && hallRecentGames.length === 0) {
+      block.style.display = 'none';
+      return;
+    }
     block.style.display = 'flex';
 
     const medalClasses = ['ico-gold', 'ico-silver', 'ico-bronze'];
-    document.getElementById('hof-top').innerHTML = top.length
-      ? top.map((e, i) => `
-          <div class="hof-row">
-            <span class="pos">${i < 3 ? ICON.medalNum(i + 1, medalClasses[i]) : '#' + (i + 1)}</span>
-            ${window.SilunetAvatars.avatarHTML(e.avatarId, e.avatarKey, '22px', '')}
-            <span class="nick">${e.nick}</span>
-            <span class="pts">${e.puntosAcumulados} pts</span>
-          </div>`).join('')
+    document.getElementById('hof-top').innerHTML = hallTopEntries.length
+      ? hallTopEntries.map((entry, index) => `
+          <button class="hof-row" type="button" onclick="showHallPlayerDetail(${index}, this)"
+                  aria-label="Ver información de ${escapeHall(entry.nick)}">
+            <span class="pos">${index < 3 ? ICON.medalNum(index + 1, medalClasses[index]) : '#' + (index + 1)}</span>
+            ${window.SilunetAvatars.avatarHTML(entry.avatarId, entry.avatarKey, '22px', '')}
+            <span class="nick">${escapeHall(entry.nick)}</span>
+            <span class="pts">${Number(entry.puntosAcumulados) || 0} pts</span>
+            <span class="hof-row-arrow">${ICON['arrow-right']()}</span>
+          </button>`).join('')
       : '<p class="hof-empty">Todavía no hay historial.</p>';
 
-    document.getElementById('hof-recent').innerHTML = recent.length
-      ? recent.map(g => {
-          const fecha = new Date(g.jugadaEn).toLocaleDateString('es', { day: '2-digit', month: 'short' });
-          const ganador = g.ganador ? `<span class="hof-winner">${ICON.medal('ico-gold')}${g.ganador}</span>` : 'sin ganador';
+    document.getElementById('hof-recent').innerHTML = hallRecentGames.length
+      ? hallRecentGames.map((game, index) => {
+          const date = new Date(game.jugadaEn).toLocaleDateString('es', { day: '2-digit', month: 'short' });
+          const winner = game.ganador ? `${ICON.medal('ico-gold')}${escapeHall(game.ganador)}` : 'sin ganador';
           return `
-          <div class="hof-row" style="flex-direction:column; align-items:flex-start; gap:2px;">
-            <span class="nick">${g.nombre}</span>
-            <span style="color:#6b7280; font-size:0.78rem;">${fecha} · ${ganador}</span>
-          </div>`;
+            <button class="hof-row hof-game-row" type="button" onclick="showHallGameDetail(${index}, this)"
+                    aria-label="Ver información de ${escapeHall(game.nombre)}">
+              <span class="hof-game-copy">
+                <span class="nick">${escapeHall(game.nombre)}</span>
+                <small>${date} · <span class="hof-winner">${winner}</span></small>
+              </span>
+              <span class="hof-row-arrow">${ICON['arrow-right']()}</span>
+            </button>`;
         }).join('')
       : '<p class="hof-empty">Todavía no hay partidas jugadas.</p>';
   }
@@ -1140,17 +1563,25 @@
   // se proyecta en la feria) se cae, no puede quedarse congelada mostrando el
   // último estado. window.SILUNET_NODES lo inyecta server.ts al servir /master.
   let ws;
+  let pingTimer;
   let reconnectTimer;
   let reconnectAttempt = 0;
   let nodeIdx = 0;
   let hasConnectedOnce = false;
   const nodeList = buildNodeList();
+  const p2p = window.SilunetP2P.create({
+    role: 'master',
+    onGameMessage: dispatchGameMessage,
+    onStatus: handleP2PStatus,
+  });
+  window.__silunetP2P = p2p;
+  p2p.attachSignaling(sendServer);
 
   function buildNodeList() {
     const self = 'ws://' + location.host;
     const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     const others = (window.SILUNET_NODES || []).map(httpToWs).filter(u => u !== self);
-    return [self, ...others];
+    return [...new Set([self, ...others])];
   }
 
   function connectWS() {
@@ -1159,14 +1590,20 @@
     ws.onopen = () => {
       reconnectAttempt = 0;
       hasConnectedOnce = true;
-      hideReconnecting();
+      p2p.serverOpened();
+      if (!p2p.failoverActive) hideReconnecting();
       send({ type: 'MASTER_JOIN' });
+      p2p.register(null, 'Master');
+      clearInterval(pingTimer);
+      pingTimer = setInterval(() => send({ type: 'PING' }), 1000);
       send({ type: 'GET_HALL_OF_FAME' }); // v2.1: salón de la fama al conectar
     };
 
     ws.onmessage = onSocketMessage;
 
     ws.onclose = () => {
+      clearInterval(pingTimer);
+      p2p.serverClosed();
       showReconnecting();
       reconnectAttempt++;
       // Tras 2 intentos seguidos al mismo nodo, prueba el siguiente del clúster
@@ -1182,6 +1619,11 @@
 
   function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
+    if (p2p.handleServerMessage(msg)) return;
+    dispatchGameMessage(msg);
+  }
+
+  function dispatchGameMessage(msg) {
     switch (msg.type) {
       case 'PLAYER_COUNT':   handlePlayerCount(msg);   break;
       case 'VOTE_START':     handleVoteStart(msg);     break;
@@ -1205,7 +1647,28 @@
     }
   }
 
-  function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+  function sendServer(msg) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  }
+
+  function send(msg) {
+    sendServer(msg);
+  }
+
+  function handleP2PStatus(status) {
+    if (status.type !== 'failover') return;
+    currentMode = 'clasico';
+    const banner = document.getElementById('reconnect-banner');
+    const text = banner?.querySelector('span:last-child');
+    if (text) text.textContent = 'Servidor fuera · la partida continúa por WebRTC';
+    banner?.classList.add('show');
+    showNotif(
+      status.isLeader
+        ? 'Failover P2P: un jugador asumió la coordinación.'
+        : 'Failover P2P activo: la partida continúa sin la laptop servidora.',
+      5000,
+    );
+  }
 
   // El banner solo tiene sentido tras la primera conexión exitosa; el intento
   // inicial ya se ve reflejado en el indicador "conectando…" del header.
@@ -1223,6 +1686,49 @@
   const modePickerTrigger = document.getElementById('mode-picker-trigger');
   const modePickerLabel = document.getElementById('mode-picker-label');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+  const waitingMain = document.getElementById('main-waiting');
+  const waitingLogo = waitingMain.querySelector('.big-logo');
+
+  function resetReactiveSurface(surface) {
+    surface.style.setProperty('--reactive-rx', '0deg');
+    surface.style.setProperty('--reactive-ry', '0deg');
+    surface.style.setProperty('--reactive-mx', '50%');
+    surface.style.setProperty('--reactive-my', '50%');
+  }
+
+  function moveReactiveSurface(surface, event) {
+    if (reducedMotion.matches || !finePointer.matches) return;
+    const rect = surface.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    surface.style.setProperty('--reactive-rx', ((.5 - y) * 5.5).toFixed(2) + 'deg');
+    surface.style.setProperty('--reactive-ry', ((x - .5) * 7).toFixed(2) + 'deg');
+    surface.style.setProperty('--reactive-mx', (x * 100).toFixed(1) + '%');
+    surface.style.setProperty('--reactive-my', (y * 100).toFixed(1) + '%');
+  }
+
+  document.querySelectorAll('.waiting-reactive').forEach(function(surface) {
+    surface.addEventListener('pointermove', function(event) { moveReactiveSurface(surface, event); });
+    surface.addEventListener('pointerleave', function() { resetReactiveSurface(surface); });
+  });
+
+  waitingMain.addEventListener('pointermove', function(event) {
+    if (reducedMotion.matches || !finePointer.matches) return;
+    const rect = waitingMain.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    waitingMain.style.setProperty('--waiting-mx', (x * 100).toFixed(1) + '%');
+    waitingMain.style.setProperty('--waiting-my', (y * 100).toFixed(1) + '%');
+    waitingLogo.style.setProperty('--logo-x', ((x - .5) * 8).toFixed(2) + 'px');
+    waitingLogo.style.setProperty('--logo-y', ((y - .5) * 5).toFixed(2) + 'px');
+  });
+  waitingMain.addEventListener('pointerleave', function() {
+    waitingMain.style.setProperty('--waiting-mx', '50%');
+    waitingMain.style.setProperty('--waiting-my', '50%');
+    waitingLogo.style.setProperty('--logo-x', '0px');
+    waitingLogo.style.setProperty('--logo-y', '0px');
+  });
 
   // La baraja nace sobre el footer: calculamos el espacio real hasta el borde
   // superior para que funcione igual con zoom, barras del navegador y proyectores.
@@ -1233,7 +1739,175 @@
     modePicker.style.setProperty('--mode-deck-max-height', availableHeight + 'px');
   }
 
+  /** ¿Hay una partida en curso? Entonces el selector no se toca. */
+  function modePickerBloqueado() {
+    return modePicker.classList.contains('locked');
+  }
+
+  /**
+   * Bloquea o libera el selector de modos. Es el único lugar que lo hace, para
+   * que la clase CSS y el estado del botón no puedan quedar desincronizados.
+   */
+  function setModePickerLocked(locked) {
+    modePicker.classList.toggle('locked', locked);
+    modePickerTrigger.disabled = locked;
+    if (locked) setModePickerOpen(false);
+  }
+
+  // ── Música de sala ─────────────────────────────────────────────────────────
+  // Suena mientras se espera al público y se calla al arrancar la partida, para
+  // no competir con los efectos ni con quien presenta. Entra y sale con un
+  // fundido: cortar de golpe se nota mucho en una sala.
+  const MusicaLobby = (() => {
+    const audio = document.getElementById('musica-lobby');
+    const VOLUMEN = 0.35;   // de fondo, muy por debajo de los efectos
+    const FUNDIDO_MS = 900;
+
+    const CLAVE_MUDA = 'silunet_musica_muda';
+    let desbloqueada = false;
+    let deberiaSonar = false;
+    let fundido = null;
+    let silenciada = false;
+    try { silenciada = localStorage.getItem(CLAVE_MUDA) === '1'; } catch { /* modo privado */ }
+
+    // El navegador no deja arrancar audio sin un gesto real del usuario. En la
+    // pantalla maestra siempre hay uno (el operador pulsa algo), así que se
+    // espera al primero y recién ahí empieza.
+    ['click', 'keydown', 'touchstart'].forEach(evt =>
+      document.addEventListener(evt, () => {
+        desbloqueada = true;
+        if (deberiaSonar) arrancar();
+      }, { once: true, passive: true })
+    );
+
+    function fundirHasta(objetivo, alTerminar) {
+      clearInterval(fundido);
+      const paso = (objetivo - audio.volume) / (FUNDIDO_MS / 50);
+      fundido = setInterval(() => {
+        const siguiente = audio.volume + paso;
+        const listo = paso >= 0 ? siguiente >= objetivo : siguiente <= objetivo;
+        audio.volume = listo ? objetivo : Math.min(1, Math.max(0, siguiente));
+        if (listo) { clearInterval(fundido); fundido = null; alTerminar && alTerminar(); }
+      }, 50);
+    }
+
+    function arrancar() {
+      if (silenciada) return;
+      audio.volume = 0;
+      // play() devuelve una promesa que se rechaza si el navegador lo bloquea:
+      // se ignora en silencio, no es un error del que haya que avisar.
+      audio.play().then(() => fundirHasta(VOLUMEN)).catch(() => {});
+    }
+
+    return {
+      entrar() {
+        deberiaSonar = true;
+        if (desbloqueada) arrancar();
+      },
+      estaSilenciada() { return silenciada; },
+      /** Silencia la música y lo recuerda para la próxima vez. */
+      silenciar(valor) {
+        silenciada = Boolean(valor);
+        try { localStorage.setItem(CLAVE_MUDA, silenciada ? '1' : '0'); } catch { /* modo privado */ }
+        if (silenciada) {
+          clearInterval(fundido);
+          fundido = null;
+          audio.pause();
+        } else if (deberiaSonar && desbloqueada) {
+          arrancar();
+        }
+        return silenciada;
+      },
+      salir() {
+        deberiaSonar = false;
+        if (audio.paused) return;
+        fundirHasta(0, () => audio.pause());
+      },
+    };
+  })();
+
+  // La maestra abre siempre en la sala de espera. No suena hasta el primer
+  // gesto del operador: el navegador no permite audio antes de eso.
+  MusicaLobby.entrar();
+
+  // ── Botones de silencio ────────────────────────────────────────────────────
+  // Dos interruptores independientes: la música de sala y los efectos. Ambos
+  // recuerdan su estado, así que si el operador silencia la música, sigue
+  // silenciada aunque recargue la pantalla a mitad de la feria.
+  function pintarBotonAudio(boton, silenciado, iconoSuena, iconoMudo) {
+    boton.setAttribute('aria-pressed', String(silenciado));
+    boton.querySelector('[data-silunet-icon]').dataset.silunetIcon = silenciado ? iconoMudo : iconoSuena;
+    ICON.hydrate(boton);
+  }
+
+  function alternarMusica() {
+    const silenciada = MusicaLobby.silenciar(!MusicaLobby.estaSilenciada());
+    pintarBotonAudio(document.getElementById('btn-musica'), silenciada, 'music', 'music-off');
+  }
+
+  function alternarEfectos() {
+    const mudo = AudioFX.setMudo(!AudioFX.estaMudo());
+    pintarBotonAudio(document.getElementById('btn-efectos'), mudo, 'volume', 'volume-off');
+    if (!mudo) AudioFX.hover();   // confirmación audible al reactivarlos
+  }
+
+  // Al cargar, los botones muestran lo que quedó guardado de la vez anterior.
+  pintarBotonAudio(document.getElementById('btn-musica'), MusicaLobby.estaSilenciada(), 'music', 'music-off');
+  pintarBotonAudio(document.getElementById('btn-efectos'), AudioFX.estaMudo(), 'volume', 'volume-off');
+
+  /** Partida en curso: el selector se cierra, se bloquea y lo dice. */
+  function bloquearSelectorDeModos() {
+    setModePickerLocked(true);
+    modePickerLabel.textContent = 'Partida en curso';
+    mostrarBotonTerminar(true);
+    actualizarBotonesDeModo();
+    MusicaLobby.salir();
+  }
+
+  // ── Terminar partida antes de tiempo ──────────────────────────────────────
+  // Va en dos pasos a propósito: corta la partida para todo el público de
+  // golpe, así que un clic accidental no debería lograrlo. Si no se confirma
+  // en unos segundos, vuelve solo a su estado normal.
+  const btnTerminar = document.getElementById('btn-terminar');
+  let confirmarTerminarTimer = null;
+
+  function mostrarBotonTerminar(visible) {
+    btnTerminar.hidden = !visible;
+    if (!visible) cancelarConfirmacionTerminar();
+  }
+
+  function cancelarConfirmacionTerminar() {
+    clearTimeout(confirmarTerminarTimer);
+    confirmarTerminarTimer = null;
+    btnTerminar.classList.remove('confirmando');
+    btnTerminar.textContent = 'Terminar partida';
+  }
+
+  function pedirTerminarPartida() {
+    if (!confirmarTerminarTimer) {
+      btnTerminar.classList.add('confirmando');
+      btnTerminar.textContent = '¿Seguro? Confirmar';
+      confirmarTerminarTimer = setTimeout(cancelarConfirmacionTerminar, 5000);
+      return;
+    }
+    cancelarConfirmacionTerminar();
+    mostrarBotonTerminar(false);
+    send({ type: 'END_GAME' });
+  }
+
+  /** Terminó la partida: el selector vuelve a estar disponible. */
+  function liberarSelectorDeModos() {
+    setModePickerLocked(false);
+    // La etiqueta sigue la misma regla que el resto: sin gente conectada no
+    // invita a elegir modo, avisa que faltan jugadores.
+    modePickerLabel.textContent = jugadoresConectados === 0 ? 'Esperando jugadores' : 'Elegir modo';
+    mostrarBotonTerminar(false);
+    actualizarBotonesDeModo();
+    MusicaLobby.entrar();
+  }
+
   function setModePickerOpen(open) {
+    if (open && modePickerBloqueado()) return; // partida en curso
     if (open) updateModeDeckViewport();
     modePicker.classList.toggle('open', open);
     modePickerTrigger.setAttribute('aria-expanded', String(open));
@@ -1241,25 +1915,32 @@
 
   function toggleModePicker(event) {
     event.stopPropagation();
+    if (modePickerBloqueado()) return;
+    // Con mouse el hover gobierna el panel: un clic no debe cerrarlo mientras
+    // el cursor sigue encima. En táctil y teclado, el clic conserva el toggle.
+    if (finePointer.matches && event.detail > 0) {
+      setModePickerOpen(true);
+      return;
+    }
     setModePickerOpen(!modePicker.classList.contains('open'));
   }
 
   modePicker.addEventListener('pointerenter', function() {
-    updateModeDeckViewport();
-    modePickerTrigger.setAttribute('aria-expanded', 'true');
+    if (modePickerBloqueado() || !finePointer.matches) return;
+    setModePickerOpen(true);
   });
   modePicker.addEventListener('pointerleave', function() {
-    if (!modePicker.classList.contains('open') && !modePicker.matches(':focus-within')) {
-      modePickerTrigger.setAttribute('aria-expanded', 'false');
-    }
+    if (!finePointer.matches || modePicker.matches(':focus-within')) return;
+    setModePickerOpen(false);
   });
   modePicker.addEventListener('focusin', function() {
-    modePickerTrigger.setAttribute('aria-expanded', 'true');
+    if (modePickerBloqueado()) return;
+    setModePickerOpen(true);
   });
   modePicker.addEventListener('focusout', function() {
     window.setTimeout(function() {
-      if (!modePicker.classList.contains('open') && !modePicker.matches(':focus-within')) {
-        modePickerTrigger.setAttribute('aria-expanded', 'false');
+      if (!modePicker.matches(':focus-within') && !modePicker.matches(':hover')) {
+        setModePickerOpen(false);
       }
     }, 0);
   });
@@ -1299,6 +1980,11 @@
   });
   document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {
+      if (document.getElementById('hof-block').classList.contains('is-flipped')) {
+        event.preventDefault();
+        closeHallDetail();
+        return;
+      }
       setModePickerOpen(false);
       modePickerTrigger.focus();
     }
@@ -1309,13 +1995,28 @@
   }
   updateModeDeckViewport();
 
+  let jugadoresConectados = 0;
+
+  /**
+   * Habilita los tres botones de modo. Dependen de DOS condiciones: que haya
+   * gente conectada y que no haya partida en curso. Antes cada una se manejaba
+   * por su lado, así que un jugador que entraba o salía a mitad de partida
+   * reactivaba los botones, y al terminar quedaban activos aunque no hubiera
+   * nadie.
+   */
+  function actualizarBotonesDeModo() {
+    const disponible = jugadoresConectados > 0 && !modePickerBloqueado();
+    for (const id of ['btn-start', 'btn-relajo', 'btn-stack']) {
+      document.getElementById(id).disabled = !disponible;
+    }
+  }
+
   function handlePlayerCount(msg) {
     document.getElementById('m-count').textContent = msg.count + ' jugador' + (msg.count === 1 ? '' : 'es');
     document.getElementById('f-count').textContent = msg.count;
-    document.getElementById('btn-start').disabled = msg.count === 0;
-    document.getElementById('btn-relajo').disabled = msg.count === 0;
-    document.getElementById('btn-stack').disabled = msg.count === 0;
-    if (!modePicker.classList.contains('locked')) {
+    jugadoresConectados = msg.count;
+    actualizarBotonesDeModo();
+    if (!modePickerBloqueado()) {
       modePickerLabel.textContent = msg.count === 0 ? 'Esperando jugadores' : 'Elegir modo';
     }
   }
@@ -1347,6 +2048,7 @@
 
   function handleVoteStart(msg) {
     currentMode = 'clasico';
+    bloquearSelectorDeModos();
     document.getElementById('main-stack').style.display = 'none';
     document.getElementById('relajo-bar').classList.remove('show');
     document.getElementById('mv-winner').textContent = '';
@@ -1362,7 +2064,6 @@
     document.getElementById('main-game').style.display    = 'none';
     document.getElementById('main-stack').style.display   = 'none';
     document.getElementById('main-voting').style.display  = 'flex';
-    document.getElementById('btn-start').disabled = true;
   }
 
   function handleVoteCountdown(msg) {
@@ -1414,7 +2115,10 @@
     document.getElementById('main-voting').style.display  = 'none';
     document.getElementById('main-game').style.display    = currentMode === 'silustack' ? 'none' : 'grid';
     document.getElementById('main-stack').style.display   = currentMode === 'silustack' ? 'grid' : 'none';
-    document.getElementById('btn-start').disabled = true;
+    // Hay ronda en curso -> selector bloqueado. Va acá y no solo en startGame()
+    // porque una maestra que se recarga a mitad de partida nunca pasó por
+    // startGame(): recibe ROUND_START del servidor y tiene que bloquearse igual.
+    bloquearSelectorDeModos();
   }
 
   // La ronda ya se conoce pero el timer real todavía no arranca: se muestra
@@ -1469,15 +2173,7 @@
   // archivo (msg.image, generado por scripts/procesar-imagenes.py). El PNG se
   // inyecta como mascara para que tome el color del tema.
   function pintarSilueta(caja, msg) {
-    if (!caja) return;
-    if (!msg.image) { caja.innerHTML = msg.svg; return; }
-    // Se arma por DOM y no concatenando HTML: la URL va a una custom property
-    // de CSS y meterla en un string con comillas anidadas es como se rompio antes.
-    caja.innerHTML = '';
-    const capa = document.createElement('span');
-    capa.className = 'silueta-img';
-    capa.style.setProperty('--silueta', 'url("' + msg.image + '")');
-    caja.appendChild(capa);
+    p2p.renderSilhouette(caja, msg);
   }
 
   function handleRoundEnd(msg) {
@@ -1486,7 +2182,7 @@
     // La ronda cerro: la silueta da paso al objeto a color. Es el momento de
     // pago del publico, y hasta aca no se podia mostrar sin regalar la palabra.
     if (msg.reveal) {
-      const foto = '<img class="reveal-img" alt="" src="' + msg.reveal + '">';
+      const foto = '<img class="reveal-img" alt="" src="' + p2p.assetUrl(msg.reveal) + '">';
       document.getElementById('m-svg').innerHTML  = foto;
       document.getElementById('ss-svg').innerHTML = foto;
     }
@@ -1511,12 +2207,11 @@
     if (msg.final) {
       currentPhase = 'gameEnd';
       setPhase('gameEnd');
-      document.getElementById('btn-start').disabled = false;
+      // La partida puede haberse terminado a mano en plena votación: ese panel
+      // ya no tiene sentido y si no se oculta queda encima de la pantalla final.
+      document.getElementById('main-voting').style.display = 'none';
       document.getElementById('btn-start').textContent = 'Jugar clásico';
-      modePicker.classList.remove('locked');
-      modePickerLabel.textContent = 'Elegir modo';
-      document.getElementById('btn-relajo').disabled = false;
-      document.getElementById('btn-stack').disabled = false;
+      liberarSelectorDeModos();
       AudioFX.gameEnd();
       // v2.1: la partida que acaba de terminar ya se persistió en la DB del
       // coordinador (game_over corre síncrono ahí) -> refresca el histórico.
@@ -1533,6 +2228,7 @@
         // El reloj comunitario pertenece a la partida: al volver a la pantalla
         // de espera se oculta, si no queda marcando 0s indefinidamente.
         document.getElementById('relajo-bar').classList.remove('show');
+        liberarSelectorDeModos();
       }, 10000);
     }
   }
@@ -1629,17 +2325,13 @@
   }
   function startGame(mode) {
     const selectedMode = mode || 'clasico';
-    setModePickerOpen(false);
-    modePicker.classList.add('locked');
+    setModePickerLocked(true);
     modePickerLabel.textContent = 'Partida en curso';
     document.dispatchEvent(new CustomEvent('silunet:mode-selected', {
       detail: { mode: selectedMode }
     }));
     const rounds = parseInt(document.getElementById('rounds-input').value) || 8;
     send({ type: 'START_GAME', totalRounds: rounds, mode: selectedMode });
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-relajo').disabled = true;
-    document.getElementById('btn-stack').disabled = true;
   }
 
   // ── UI helpers ─────────────────────────────────────────────────────────────

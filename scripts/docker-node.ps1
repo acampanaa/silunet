@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Position = 0)]
-  [ValidateSet('up', 'down', 'restart', 'status', 'logs', 'info')]
+  [ValidateSet('up', 'down', 'restart', 'status', 'logs', 'info', 'fire', 'recover')]
   [string]$Action = 'up',
 
   [string]$EnvFile = ''
@@ -47,6 +47,16 @@ switch ($Action) {
   }
   'logs' {
     Invoke-Docker ($compose + @('logs', '--tail', '120', 'node'))
+  }
+  'fire' {
+    Write-Host 'Prueba de fuego: terminando este nodo inmediatamente...' -ForegroundColor Yellow
+    Invoke-Docker ($compose + @('kill', 'node'))
+    Write-Host 'No derribes otro nodo: primero ejecuta recover en esta laptop.' -ForegroundColor Yellow
+  }
+  'recover' {
+    Invoke-Docker ($compose + @('up', '-d', '--no-build', 'node'))
+    Invoke-Docker ($compose + @('ps', 'node'))
+    Write-Host 'Nodo reintegrado; espera a que aparezca healthy.' -ForegroundColor Green
   }
   'info' {
     Invoke-Docker ($compose + @('exec', '-T', 'node', 'wget', '-q', '-O-', 'http://127.0.0.1:3001/api/info'))

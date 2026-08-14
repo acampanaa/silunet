@@ -46,6 +46,26 @@ El túnel publica únicamente el gateway, no PostgreSQL ni los puertos internos 
 Es un Quick Tunnel temporal: la URL cambia al reiniciarlo. Para una instalación permanente se
 debe usar un túnel nombrado con dominio propio.
 
+### Prueba de fuego del cluster con tunnel
+
+Con una partida activa y los tres nodos sanos, ejecutar:
+
+```powershell
+.\scripts\docker-cluster.ps1 fire
+```
+
+El script detecta el coordinador vigente y lo mata inmediatamente. No usa `stop`, porque
+`stop` espera un cierre gradual y no representa una falla abrupta. Los dos nodos restantes
+conservan quorum, eligen coordinador y los navegadores se reconectan a la misma URL publica;
+el enlace `trycloudflare.com` no cambia.
+
+Al terminar la observacion, reintegrar la replica:
+
+```powershell
+.\scripts\docker-cluster.ps1 recover
+```
+
+No se debe matar un segundo nodo antes de ejecutar `recover`.
 ## Opción B: un nodo Docker en cada laptop
 
 ### 1. Preparar la red
@@ -125,13 +145,13 @@ controlada es preferible PostgreSQL administrado con TLS, no publicar `5432` dir
 En la laptop que aloja al coordinador actual:
 
 ```powershell
-.\scripts\docker-node.ps1 down
+.\scripts\docker-node.ps1 fire
 ```
 
 Los otros dos nodos conservan quorum, eligen coordinador y continúan. Para reintegrarlo:
 
 ```powershell
-.\scripts\docker-node.ps1 up
+.\scripts\docker-node.ps1 recover
 ```
 
 No se debe derribar un segundo nodo antes de reintegrar el primero: una sola réplica pierde

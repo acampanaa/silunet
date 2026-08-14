@@ -29,34 +29,46 @@ backend recupera la partida desde disco y continúa.
 | 10 | [Límites, decisiones y defensa](10-limites-y-defensa.md) | ¿Qué garantiza realmente el proyecto y cómo explicarlo? |
 | 11 | [Monitoreo distribuido por participante](11-monitoreo-distribuido.md) | ¿Cómo ve el master los latidos, latencia, peers y nodos de cada persona? |
 | 12 | [Réplicas backend durables](12-replicas-backend-durables.md) | ¿Cómo continúa todo el backend con quorum, término y recuperación desde disco? |
+| 13 | [Gateway y una sola dirección](13-gateway-y-una-sola-direccion.md) | ¿Cómo se reconectan los celulares si solo existe una URL (Docker o túnel)? |
+| 14 | [Cerco de acciones](14-cerco-de-acciones.md) | ¿Cómo se evita aplicar una jugada dos veces o sobre un estado viejo? |
 
 > Los capítulos 1 a 10 conservan la evolución histórica del prototipo. Para la arquitectura
-> autoritativa actual, empieza por el capítulo 12; el 11 explica su observabilidad.
+> autoritativa actual, leer **12 → 13 → 14** en ese orden: el 12 explica cómo se confirma el
+> estado, el 13 cómo entra y vuelve un cliente, y el 14 qué acciones se admiten sobre ese
+> estado. El 11 explica la observabilidad de todo lo anterior.
 
 ## Mapa mental mínimo
 
 ```mermaid
 flowchart TB
-    N1["Backend 1<br/>lider o seguidor"]
-    N2["Backend 2<br/>replica durable"]
-    N3["Backend 3<br/>replica durable"]
     A["Jugador A<br/>WebSocket"]
     B["Jugador B<br/>WebSocket"]
     M["/master<br/>observa"]
+    G["Gateway Nginx<br/>una sola direccion<br/>opcional, cap. 13"]
+    N1["Backend 1<br/>lider o seguidor"]
+    N2["Backend 2<br/>replica durable"]
+    N3["Backend 3<br/>replica durable"]
     DB[("PostgreSQL o SQLite<br/>solo historia")]
 
+    A --> G
+    B --> G
+    M --> G
+    G --> N1
+    G --> N2
+    G --> N3
     N1 <-->|"replicacion + ACK"| N2
     N1 <-->|"replicacion + ACK"| N3
     N2 <-->|"eleccion + estado"| N3
-    N1 -->|"push WebSocket"| A
-    N2 -->|"push WebSocket"| B
-    N3 -->|"push WebSocket"| M
     N1 -.->|"partidas cerradas"| DB
 
     N1 -.->|"cae"| X["Bully elige otro backend"]
     X --> L["nuevo termino + quorum 2/3"]
     L --> C["restaura disco y continua"]
 ```
+
+> En despliegue LAN sin gateway (un nodo por laptop) las flechas de arriba van directas: cada
+> navegador conoce las tres direcciones y rota él mismo. El gateway solo cambia **por dónde se
+> entra**, nunca quién manda.
 
 ## Cuatro reglas que evitan confusiones
 
@@ -68,16 +80,21 @@ flowchart TB
    reside en el backend elegido por quorum.
 4. **La continuidad usa disco en cada backend.** Tolera la caída de un nodo y el reinicio de
    procesos; con solo 1 de 3 no acepta escrituras para evitar dos verdades distintas.
+5. **El gateway Nginx no es autoridad.** Reparte conexiones y saca de rotación al nodo muerto,
+   pero no conoce el término ni participa en la elección. Puede mandar a un jugador a un
+   seguidor: ese seguidor reenvía la acción al líder.
 
 ## Código autoritativo para contrastar la explicación
 
 - [src/monitoring.ts](../../src/monitoring.ts): agregación de telemetría de personas y nodos.
 - [public/distributed-monitor.js](../../public/distributed-monitor.js): panel operativo de /master.
 - [`src/cluster.ts`](../../src/cluster.ts): heartbeats, quorum, términos y elección Bully.
-- [`src/replicaStore.ts`](../../src/replicaStore.ts): snapshot durable y cercado por término/índice.
-- [`src/server.ts`](../../src/server.ts): WebSocket, commits por mayoría y cambio de líder.
-- [`src/game.ts`](../../src/game.ts): reglas del motor original y construcción del snapshot.
+- [`src/replicaStore.ts`](../../src/replicaStore.ts): snapshot durable, cola de commits y cercado por término/índice.
+- [`src/server.ts`](../../src/server.ts): WebSocket, cerco de acciones, commits por mayoría y cambio de líder.
+- [`src/game.ts`](../../src/game.ts): reglas del motor original, deduplicación y construcción del snapshot.
 - [`src/types.ts`](../../src/types.ts): forma de los estados y mensajes.
+- [`docker/nginx.conf`](../../docker/nginx.conf) y [`compose.cluster.yaml`](../../compose.cluster.yaml): gateway y topología de despliegue.
+- [`scripts/docker-cluster.ps1`](../../scripts/docker-cluster.ps1): `up`, `tunnel`, `fire`, `recover`.
 - [`vv/caos-coordinador.js`](../../vv/caos-coordinador.js): prueba de fuego automatizada.
 
 Siguiente: [01 · Panorama y vocabulario](01-panorama-y-vocabulario.md).

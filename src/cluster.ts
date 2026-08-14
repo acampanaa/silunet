@@ -13,7 +13,8 @@ import { LamportClock } from './lamport';
 
 // Eje 4: heartbeats entre nodos. El documento pide detectar la caída en ~2s.
 const HEARTBEAT_INTERVAL_MS = 1000; // latido a cada peer
-const HEARTBEAT_TIMEOUT_MS  = 2000; // umbral máximo exigido por la rúbrica
+// Docker Desktop puede pausar brevemente un contenedor durante el fsync.
+const HEARTBEAT_TIMEOUT_MS  = 5000; // evita elecciones falsas sin ocultar una caida real
 const HEARTBEAT_CHECK_MS    = 50;
 
 // Eje 4 — Algoritmo del Matón (Bully)

@@ -32,6 +32,7 @@ function isSnapshot(value: unknown): value is GameSnapshot {
 /** Replica en disco de un backend. No depende de RAM ni del navegador. */
 export class ReplicaStore {
   private current: DurableReplica | null = null;
+  private commitQueue: Promise<void> = Promise.resolve();
   readonly filePath: string;
 
   constructor(readonly nodeId: string, readonly clusterId: string, directory: string) {
@@ -59,38 +60,46 @@ export class ReplicaStore {
     return this.current;
   }
 
-  commit(input: Omit<DurableReplica, 'formatVersion' | 'clusterId' | 'nodeId' | 'committedAt'>): DurableReplica {
-    if (!Number.isSafeInteger(input.term) || input.term < 0) throw new Error('Termino de replica invalido');
-    if (!Number.isSafeInteger(input.index) || input.index < 1) throw new Error('Indice de replica invalido');
-    if (this.current && input.term < this.current.term) return this.current;
-    if (this.current && input.term === this.current.term && input.index < this.current.index) return this.current;
+  commit(input: Omit<DurableReplica, 'formatVersion' | 'clusterId' | 'nodeId' | 'committedAt'>): Promise<DurableReplica> {
+    const work = async (): Promise<DurableReplica> => {
+      if (!Number.isSafeInteger(input.term) || input.term < 0) throw new Error('Termino de replica invalido');
+      if (!Number.isSafeInteger(input.index) || input.index < 1) throw new Error('Indice de replica invalido');
+      if (this.current && input.term < this.current.term) return this.current;
+      if (this.current && input.term === this.current.term && input.index < this.current.index) return this.current;
 
-    const replica: DurableReplica = {
-      formatVersion: REPLICA_FORMAT_VERSION,
-      clusterId: this.clusterId,
-      nodeId: this.nodeId,
-      leaderId: input.leaderId,
-      term: input.term,
-      index: input.index,
-      committedAt: Date.now(),
-      snapshot: input.snapshot,
+      const replica: DurableReplica = {
+        formatVersion: REPLICA_FORMAT_VERSION,
+        clusterId: this.clusterId,
+        nodeId: this.nodeId,
+        leaderId: input.leaderId,
+        term: input.term,
+        index: input.index,
+        committedAt: Date.now(),
+        snapshot: input.snapshot,
+      };
+      await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
+      const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+      const handle = await fs.promises.open(temporary, 'wx');
+      try {
+        await handle.writeFile(JSON.stringify(replica), 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await fs.promises.rename(temporary, this.filePath);
+      } catch {
+        try { await fs.promises.unlink(this.filePath); } catch { /* no existia */ }
+        await fs.promises.rename(temporary, this.filePath);
+      }
+      this.current = replica;
+      return replica;
     };
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    const fd = fs.openSync(temporary, 'wx');
-    try {
-      fs.writeFileSync(fd, JSON.stringify(replica), 'utf8');
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    try {
-      fs.renameSync(temporary, this.filePath);
-    } catch {
-      try { fs.unlinkSync(this.filePath); } catch { /* no existia */ }
-      fs.renameSync(temporary, this.filePath);
-    }
-    this.current = replica;
-    return replica;
+
+    // Replica messages can arrive back-to-back. Serialize durable writes without
+    // blocking heartbeats, WebSockets or coordinator elections.
+    const pending = this.commitQueue.then(work, work);
+    this.commitQueue = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 }

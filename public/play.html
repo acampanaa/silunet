@@ -1189,7 +1189,7 @@
     if (versionedActions.has(msg.type)) {
       msg = Object.assign({}, msg, {
         stateVersion: stateVersion,
-        actionId: `${playerId || 'pending'}-${Date.now()}-${++actionSequence}`,
+        actionId: `${myPlayerId || 'pending'}-${Date.now()}-${++actionSequence}`,
         lamport: msg.lamport == null ? lTick() : msg.lamport,
       });
     }

@@ -40,7 +40,7 @@ const PUBLIC_NODE_URLS = SAME_ORIGIN_GATEWAY
 const MAX_PLAYERS = 5;
 const CLUSTER_ID = process.env.CLUSTER_ID ?? 'silunet-main';
 const REPLICA_DIR = process.env.REPLICA_DIR ?? path.join(__dirname, '..', 'data', 'replicas');
-const REPLICA_COMMIT_TIMEOUT_MS = 1800;
+const REPLICA_COMMIT_TIMEOUT_MS = 4000;
 const REPLICA_SYNC_WINDOW_MS = 700;
 
 // El Game corre en todos los nodos pero solo el coordinador lo controla.
@@ -217,7 +217,13 @@ const httpServer = http.createServer((req, res) => {
       const nodesScript = `<script>window.SILUNET_NODES = ${JSON.stringify(siblingNodeUrls())};</script>\n`;
       body = data.toString('utf8').replace('</head>', `${nodesScript}</head>`);
     }
-    res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
+    const cacheControl = ext === '.html'
+      ? 'no-store'
+      : ext === '.js' ? 'no-cache' : 'public, max-age=3600';
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] ?? 'application/octet-stream',
+      'Cache-Control': cacheControl,
+    });
     res.end(body);
   });
 });
@@ -247,6 +253,18 @@ const VERSIONED_ACTIONS = new Set<string>([
   'GUESS', 'REQUEST_HINT', 'START_GAME', 'END_GAME', 'STACK_ACTION', 'CAST_VOTE',
 ]);
 
+// La replica avanza con cada broadcast. Entre el ultimo mensaje que recibe el
+// navegador y su accion pueden confirmarse algunos commits (especialmente a
+// traves del gateway/tunel). Una ventana pequena conserva el cerco contra
+// acciones realmente antiguas sin rechazar votos o respuestas por una carrera
+// normal de red.
+const MAX_ACTION_VERSION_LAG = 8;
+
+function actionVersionIsAcceptable(received: number | null, expected: number): boolean {
+  return received == null
+    || (Number.isSafeInteger(received) && received <= expected && expected - received <= MAX_ACTION_VERSION_LAG);
+}
+
 function validateClientState(ws: WebSocket, msg: C2S): boolean {
   if (!VERSIONED_ACTIONS.has(msg.type)) return true;
   if (!cluster.hasQuorum) {
@@ -255,15 +273,14 @@ function validateClientState(ws: WebSocket, msg: C2S): boolean {
   }
   const received = msg.stateVersion == null ? null : Number(msg.stateVersion);
   const expected = replicaStore.index;
-  const versionMatches = received == null
-    || (Number.isSafeInteger(received) && received === expected);
-  if (versionMatches && game.acceptAction(msg.actionId)) return true;
+  const versionMatches = actionVersionIsAcceptable(received, expected);
+  if (versionMatches && (!cluster.isCoordinator || game.acceptAction(msg.actionId))) return true;
   if (versionMatches) {
     send(ws, { type: 'ERROR', message: 'La jugada duplicada ya habia sido procesada.' });
     return false;
   }
 
-  send(ws, { type: 'STATE_STALE', expectedVersion: expected, receivedVersion: received });
+  send(ws, { type: 'STATE_STALE', expectedVersion: expected, receivedVersion: received ?? -1 });
   const round = game.getCurrentRoundInfo();
   if (round) send(ws, { type: 'ROUND_START', ...round });
   send(ws, { type: 'RANKING', entries: game.getRanking(), final: game.getPhase() === 'gameEnd' });
@@ -409,8 +426,7 @@ function validateForwardedAction(
 ): boolean {
   const received = msg.stateVersion == null ? null : Number(msg.stateVersion);
   const expected = replicaStore.index;
-  const versionMatches = received == null
-    || (Number.isSafeInteger(received) && received === expected);
+  const versionMatches = actionVersionIsAcceptable(received, expected);
   if (versionMatches && game.acceptAction(msg.actionId)) return true;
 
   cluster.sendToPeer(msg.originNode, {
@@ -560,7 +576,7 @@ async function commitSnapshot(snapshot: GameSnapshot): Promise<number> {
 
   const term = cluster.currentTerm;
   const index = replicaStore.index + 1;
-  replicaStore.commit({ leaderId: NODE_ID, term, index, snapshot });
+  await replicaStore.commit({ leaderId: NODE_ID, term, index, snapshot });
   if (cluster.quorumSize === 1) return index;
 
   return new Promise<number>((resolve, reject) => {
@@ -797,7 +813,7 @@ async function synchronizeReplicaBeforeLeadership(): Promise<void> {
 
   const newest = sync.responses.sort((a, b) => b.term - a.term || b.index - a.index)[0];
   if (!newest) return;
-  replicaStore.commit({
+  await replicaStore.commit({
     leaderId: NODE_ID,
     term: cluster.currentTerm,
     index: Math.max(1, newest.index),
@@ -874,7 +890,7 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // no lo mostrará a los celulares hasta reunir una mayoría de estos ACK.
     case 'N_REPLICATE': {
       if (msg.term !== cluster.currentTerm || msg.leaderId !== cluster.coordinatorId) return;
-      replicaStore.commit({
+      await replicaStore.commit({
         leaderId: msg.leaderId,
         term: msg.term,
         index: msg.index,

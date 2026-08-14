@@ -259,7 +259,7 @@
     const savedToken = localStorage.getItem('silunet_token');
     if (savedNick && savedToken) {
       sessionStorage.setItem('silunet_nick', savedNick);
-      window.location.replace('/play');
+      window.location.replace('/play?v=20260814-actions2');
     }
     if (savedNick) {
       const inp = document.getElementById('nick');
@@ -305,7 +305,7 @@
       }
       sessionStorage.setItem('silunet_nick', nick);
       localStorage.setItem('silunet_avatar', String(selectedAvatar));
-      window.location.href = '/play';
+      window.location.href = '/play?v=20260814-actions2';
     }
   </script>
 </body>

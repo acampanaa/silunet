@@ -31,13 +31,13 @@ import {
 } from '../../src/wordBank';
 
 describe('Réplica durable del backend', () => {
-  test('sobrevive al reinicio y cerca términos antiguos', t => {
+  test('sobrevive al reinicio y cerca términos antiguos', async t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'silunet-replica-'));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const snapshot = new Game().snapshot();
 
     const firstProcess = new ReplicaStore('node2', 'test-cluster', directory);
-    firstProcess.commit({ leaderId: 'node1', term: 4, index: 21, snapshot });
+    await firstProcess.commit({ leaderId: 'node1', term: 4, index: 21, snapshot });
 
     const restartedProcess = new ReplicaStore('node2', 'test-cluster', directory);
     const loaded = restartedProcess.load();
@@ -45,7 +45,7 @@ describe('Réplica durable del backend', () => {
     assert.equal(loaded?.term, 4);
     assert.equal(loaded?.snapshot.phase, 'waiting');
 
-    restartedProcess.commit({ leaderId: 'lider-viejo', term: 3, index: 99, snapshot });
+    await restartedProcess.commit({ leaderId: 'lider-viejo', term: 3, index: 99, snapshot });
     assert.equal(restartedProcess.index, 21, 'un líder cercado no pisa el término vigente');
   });
 });

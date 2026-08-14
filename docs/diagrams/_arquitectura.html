@@ -1,58 +1,37 @@
 <!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
+<html lang='es'><head><meta charset='UTF-8'>
 <style>
   body { margin:0; background:#0f0f1a; display:flex; justify-content:center;
          align-items:center; min-height:100vh; padding:36px; box-sizing:border-box; }
   .mermaid { width:100%; }
   .mermaid svg { width:100% !important; height:auto !important; }
 </style></head><body>
-<pre class="mermaid">
+<pre class='mermaid'>
 flowchart TB
-    subgraph LAN["LAN cerrada del stand · router/AP propio"]
-        H["Laptop host<br/>Node.js + HTTP/WebSocket<br/>juego inicial y señalización"]
-        M["/master<br/>observador P2P no elegible"]
-
-        subgraph MESH["Malla WebRTC completa · 2 a 5 jugadores"]
-            direction LR
-            A["Jugador A<br/>réplica + recursos cacheados"]
-            B["Jugador B<br/>réplica + recursos cacheados"]
-            C["Jugadores C…E<br/>réplica + recursos cacheados"]
-        end
+    subgraph LAN[LAN cerrada del stand]
+      C[Celulares - play]
+      M[Pantalla - master]
+      subgraph CL[Cluster de tres backends simetricos]
+        N1[Node 1 - lider o seguidor]
+        N2[Node 2 - lider o seguidor]
+        N3[Node 3 - lider o seguidor]
+        N1 <-->|WebSocket N2N + heartbeat| N2
+        N2 <-->|WebSocket N2N + heartbeat| N3
+        N1 <-->|WebSocket N2N + heartbeat| N3
+      end
     end
-    H -->|"HTTP + WebSocket inicial"| M
-    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| A
-    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| B
-    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| C
-
-    A <-->|"WebRTC DataChannel"| B
-    B <-->|"WebRTC DataChannel"| C
-    A <-->|"WebRTC DataChannel"| C
-    M <-.->|"WebRTC · solo observa"| A
-    M <-.->|"WebRTC · solo observa"| B
-    M <-.->|"WebRTC · solo observa"| C
-    DB[("PostgreSQL / SQLite<br/>solo historia cerrada")]
-    H -.->|"fuera del camino crítico"| DB
-
-    subgraph OFF["Si el host desaparece"]
-        E["Elección Bully entre jugadores<br/>gana el ID P2P mayor"]
-        L["Nuevo líder ejecuta Clásico<br/>desde el snapshot local"]
-        K["GAME + STATE por DataChannel<br/>sin HTTP ni base de datos"]
-        E --> L --> K
-    end
-
-    A -.-> E
-    B -.-> E
-    C -.-> E
-    classDef host fill:#7c3aed,stroke:#a78bfa,color:#fff;
-    classDef peer fill:#15152a,stroke:#06b6d4,color:#e8f4ff;
-    classDef support fill:#15152a,stroke:#64748b,color:#cbd5e1;
-    classDef fail fill:#052e2b,stroke:#10b981,color:#d1fae5;
-    class H host;
-    class A,B,C peer;
-    class M,DB support;
-    class E,L,K fail;
+    C <-->|WebSocket persistente| N1
+    M <-->|WebSocket persistente| N2
+    N1 --> D1[(Replica durable 1)]
+    N2 --> D2[(Replica durable 2)]
+    N3 --> D3[(Replica durable 3)]
+    N1 -. historia opcional .-> DB[(PostgreSQL)]
+    classDef node fill:#15152a,stroke:#06b6d4,color:#e8f4ff;
+    classDef disk fill:#052e2b,stroke:#10b981,color:#d1fae5;
+    class N1,N2,N3 node;
+    class D1,D2,D3 disk;
 </pre>
-<script type="module">
+<script type='module'>
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
   mermaid.initialize({ startOnLoad:true, theme:'dark',
     themeVariables:{ fontFamily:'system-ui, sans-serif', fontSize:'15px' },

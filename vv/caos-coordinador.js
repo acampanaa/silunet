@@ -3,7 +3,7 @@
  * V&V — prueba de caos (Eje 4).
  *
  * Levanta un clúster real de 3 nodos, arranca una partida y va matando al
- * coordinador vigente dos veces seguidas (hasta quedar con un solo nodo vivo)
+ * coordinador vigente dos veces, reiniciando la primera réplica para conservar quorum 2/3
  * mientras una "pantalla maestra" y dos "celulares" reconectan solos — la
  * MISMA lógica que corre en public/master.html y public/play.html, no un
  * doble de prueba. Verifica, contra el sistema real:
@@ -24,7 +24,7 @@
 const assert = require('assert');
 const {
   sleep, cleanDbs, spawnCluster, stopCluster, waitForClusterReady,
-  waitForEvent, ReconnectingClient,
+  waitForEvent, fetchInfo, ReconnectingClient,
 } = require('./lib');
 
 const NODES = [
@@ -145,7 +145,18 @@ async function run() {
       log(`[OK] el reloj comunitario sobrevivió al cambio de coordinador: ${relojAntesDeCaida}s -> ${reloj.secondsLeft}s (sin reiniciarse)`);
     }
 
-    // ── Caída 2: mata al nuevo coordinador (debería ser ch3, el de mayor id) ──
+    // Reintegra ch1 desde SU DISCO antes de provocar otra caída. Un sistema de
+    // tres réplicas tolera una falla a la vez; continuar con una sola permitiría
+    // split-brain y no sería consistencia estricta.
+    log('reiniciando ch1 como réplica fría desde disco...');
+    const restarted = spawnCluster([NODES[0]], { verbose: process.env.VV_VERBOSE === '1' })[0];
+    procById.set('ch1', restarted);
+    await waitForClusterReady(NODES[0].port, 2, 12000);
+    const restartedInfo = await fetchInfo(NODES[0].port);
+    assert.ok(restartedInfo.replicaIndex > 0, 'ch1 reinició sin cargar su réplica durable');
+    log(`[OK] ch1 volvió desde disco con réplica ${restartedInfo.replicaIndex}`);
+
+    // ── Caída 2: mata al líder, pero conserva ch1 + ch2 = quorum 2/3 ────────
     const coordToKill = clusterState.find(n => n.isCoordinator)?.id;
     assert.ok(coordToKill, 'no se pudo determinar el coordinador vigente antes de la 2a caída');
     killNode(coordToKill);
@@ -162,10 +173,10 @@ async function run() {
       msg => msg.type === 'TICK' || msg.type === 'ROUND_START');
     const gap2 = Date.now() - t2;
     assert.ok(gap2 < CONTINUITY_TIMEOUT_MS, `la partida tardó demasiado en dar señal de vida tras caída 2: ${gap2}ms`);
-    log(`[OK] la partida SIGUE sin congelarse con un solo nodo vivo: señal de vida (${life2.type}) ${gap2}ms después de matar ${coordToKill}`);
+    log(`[OK] la partida sigue con quorum 2/3: señal de vida (${life2.type}) ${gap2}ms después de matar ${coordToKill}`);
 
     // ── Deja terminar la partida con el único nodo que queda y revisa el cierre ──
-    log('esperando a que la partida termine con el único nodo sobreviviente...');
+    log('esperando a que la partida termine con las dos réplicas sobrevivientes...');
     const finalRanking = await waitForEvent(observer, 'RANKING', GAME_END_TIMEOUT_MS, msg => msg.final === true);
 
     const nicks = finalRanking.entries.map(e => e.nick);
@@ -192,7 +203,7 @@ async function run() {
       log('[OK] PostgreSQL confirmó una sola partida después de los dos cambios de coordinador');
     }
 
-    log('TODO OK — el sistema tolera perder 2 de 3 nodos (incluido el coordinador dos veces) sin congelarse ni perder identidades');
+    log('TODO OK — dos failovers consecutivos, reintegrando réplica, sin perder estado ni identidades');
   } catch (err) {
     failed = true;
     console.error('[vv-caos] [FAIL] FALLÓ:', err.message);

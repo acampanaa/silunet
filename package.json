@@ -11,7 +11,8 @@
     "test:junit": "npm run build && node scripts/run-maven.js test",
     "test:selenium": "npm run build && node scripts/run-maven.js test -Pselenium",
     "test:selenium:headed": "npm run build && node scripts/run-maven.js test -Pselenium -DseleniumHeadless=false",
-    "test:p2p-fire": "npm run build && node scripts/run-maven.js test -Pselenium -Dtest=P2PFireTest",
+    "test:fire": "npm run build && npm run vv:caos",
+    "test:p2p-fire": "npm run test:fire",
     "vv:concurrencia": "node vv/concurrencia-lamport.js",
     "vv:caos": "node vv/caos-coordinador.js",
     "vv:latencia": "node vv/latencia.js"

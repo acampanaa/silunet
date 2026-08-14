@@ -1,245 +1,89 @@
-<!DOCTYPE html>
-<html lang="es">
+<!doctype html>
+<html lang='es'>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Silunet — Reporte Arquitectónico Técnico</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 0 0 60px;
-    background: #0f0f1a; color: #e8e8f0;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    line-height: 1.55;
-  }
-  header {
-    display: flex; align-items: center; gap: 16px;
-    padding: 20px 40px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a;
-  }
-  .logo { font-size: 1.8rem; font-weight: 900; letter-spacing: -1px;
-    background: linear-gradient(135deg, #7c3aed, #06b6d4);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-  .puce { display:flex; align-items:center; gap:10px; padding-left:16px; border-left:1px solid #2a2a4a; }
-  .puce-mark { width:36px; height:36px; border-radius:7px;
-    background: linear-gradient(135deg, #1d4ed8, #0a2a6b);
-    display:flex; align-items:center; justify-content:center;
-    font-size:.78rem; font-weight:900; color:#fff; }
-  .puce-text { display:flex; flex-direction:column; line-height:1.15; }
-  .puce-name { font-size:.85rem; font-weight:800; color:#cdd9f5; }
-  .puce-sub  { font-size:.7rem;  color:#6b7280; }
-  .doc-title { margin-left:auto; text-align:right; font-size:.8rem; color:#9aa7c7; }
-  main { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
-  section { margin-top: 40px; }
-  h2 { font-size: 1.35rem; color: #fff; border-left: 4px solid #06b6d4;
-       padding-left: 12px; margin-bottom: 6px; }
-  h2 .eje { font-size:.8rem; color:#06b6d4; font-weight:600; }
-  p.lead { color:#b9c2dd; margin: 4px 0 18px; }
-  .card { background:#15152a; border:1px solid #2a2a4a; border-radius:14px;
-          padding: 22px; overflow-x:auto; }
-  .mermaid { display:flex; justify-content:center; }
-  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:.92rem; }
-  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid #2a2a4a; }
-  th { color:#9aa7c7; font-weight:600; text-transform:uppercase; font-size:.72rem; letter-spacing:.05em; }
-  td.win { color:#fbbf24; font-weight:700; }
-  ul.findings { margin: 16px 0 0; padding-left: 0; list-style: none; }
-  ul.findings li { position:relative; padding-left: 26px; margin-bottom: 10px; color:#cdd5ec; }
-  ul.findings li::before { content:"✔"; position:absolute; left:0; color:#10b981; font-weight:900; }
-  code { background:#0f0f1a; border:1px solid #2a2a4a; border-radius:5px;
-         padding:1px 6px; font-size:.86em; color:#7dd3fc; }
-  .note { font-size:.82rem; color:#6b7280; margin-top:10px; }
-  @media print {
-    body { background:#fff; color:#111; }
-    header, .card { background:#fff; border-color:#ccc; }
-    .logo, .puce-name { -webkit-text-fill-color: initial; color:#111; background:none; }
-    section { break-inside: avoid; }
-  }
-</style>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1'>
+  <title>SiluNet · Arquitectura distribuida</title>
+  <style>
+    :root { color-scheme:dark; --bg:#080b16; --card:#11172a; --line:#26314f; --cyan:#22d3ee; --green:#a3e635; }
+    * { box-sizing:border-box } body { margin:0; background:var(--bg); color:#e8eefc; font:15px/1.6 system-ui,sans-serif }
+    main { width:min(1080px,calc(100% - 32px)); margin:36px auto 80px } h1 { font-size:clamp(2rem,5vw,4rem); line-height:1 }
+    h2 { margin-top:40px; color:var(--cyan) } .lead { color:#aebbd7; max-width:78ch }
+    .card { margin:20px 0; padding:24px; border:1px solid var(--line); border-radius:20px; background:var(--card) }
+    .mermaid { overflow:auto } table { width:100%; border-collapse:collapse } th,td { padding:12px; border-bottom:1px solid var(--line); text-align:left }
+    th { color:var(--green) } code { color:var(--cyan) }
+  </style>
 </head>
-<body>
+<body><main>
+  <p>SISTEMAS DISTRIBUIDOS · PRUEBA DE FUEGO</p>
+  <h1>Tres backends.<br>Un líder. Quorum 2/3.</h1>
+  <p class='lead'>Los navegadores son clientes WebSocket. El estado autoritativo se replica y fuerza a disco en tres procesos Node; ningún celular ejecuta el motor cuando cae un servidor.</p>
 
-<header>
-  <div class="logo">SILUNET</div>
-  <div class="puce">
-    <div class="puce-mark">PUCE</div>
-    <div class="puce-text">
-      <span class="puce-name">PUCE Sede Manabí</span>
-      <span class="puce-sub">Ingeniería de Software</span>
-    </div>
-  </div>
-  <div class="doc-title">Reporte Arquitectónico Técnico<br>Trivia de Siluetas Distribuida</div>
-</header>
-
-<main>
-
-  <!-- ───────────────────────── 1. ARQUITECTURA ───────────────────────── -->
-  <section>
-    <h2>1. Arquitectura de la red local del stand</h2>
-    <p class="lead">Topología Wi-Fi sin salida a internet: una laptop entrega la aplicación,
-      inicia el juego y señaliza una malla WebRTC completa entre hasta cinco jugadores. Cada
-      navegador conserva el snapshot y los recursos necesarios para continuar Clásico sin el host.</p>
-    <div class="card">
-      <pre class="mermaid">
-flowchart TB
-    subgraph LAN["LAN cerrada del stand · router/AP propio"]
-        H["Laptop host&#10;Node.js + HTTP/WebSocket&#10;juego inicial y señalización"]
-        M["/master&#10;observador P2P no elegible"]
-        subgraph MESH["Malla WebRTC completa · 2 a 5 jugadores"]
-            direction LR
-            A["Jugador A&#10;réplica + recursos cacheados"]
-            B["Jugador B&#10;réplica + recursos cacheados"]
-            C["Jugadores C…E&#10;réplica + recursos cacheados"]
-        end
-    end
-
-    H -->|"Bootstrap, P2P_SNAPSHOT y señalización"| M
-    H -->|"Bootstrap + señalización"| A
-    H -->|"Bootstrap + señalización"| B
-    H -->|"Bootstrap + señalización"| C
-    A <-->|"WebRTC DataChannel"| B
-    B <-->|"WebRTC DataChannel"| C
-    A <-->|"WebRTC DataChannel"| C
-    M <-.->|"WebRTC · solo observa"| A
-    M <-.->|"WebRTC · solo observa"| B
-
-    DB[("PostgreSQL / SQLite&#10;solo historia cerrada")]
-    H -.->|"fuera del camino crítico"| DB
-    A & B & C -.-> E["Caída del host&#10;elección Bully entre jugadores"]
-    E --> L["Nuevo líder ejecuta Clásico&#10;desde el snapshot local"]
-    L --> O["GAME + STATE por DataChannel&#10;sin HTTP ni base de datos"]
-
-    classDef host fill:#7c3aed,stroke:#a78bfa,color:#fff;
-    classDef peer fill:#15152a,stroke:#06b6d4,color:#e8f4ff;
-    classDef support fill:#15152a,stroke:#64748b,color:#cbd5e1;
-    classDef fail fill:#052e2b,stroke:#10b981,color:#d1fae5;
-    class H host;
-    class A,B,C peer;
-    class M,DB support;
-    class E,L,O fail;
-      </pre>
-    </div>
-    <p class="note">PostgreSQL o SQLite guardan únicamente historia cerrada. La continuidad
-      P2P no llama HTTP ni consulta la base: usa DataChannels, snapshots y recursos cacheados
-      dentro de cada navegador.</p>
-  </section>
-
-  <!-- ───────────────────── 2. SECUENCIA — CONTINUIDAD P2P ───────────────────── -->
-  <section>
-    <h2>2. Caída del host y continuidad del juego <span class="eje">— Eje 4 (tolerancia a fallos)</span></h2>
-    <p class="lead">Mientras la laptop está disponible entrega snapshots y señaliza la malla.
-      Si desaparece, los jugadores detectan la pérdida, acuerdan por mayoría activar el failover
-      y aplican una elección Bully: gana el navegador jugador con el identificador P2P mayor.</p>
-    <div class="card">
-      <pre class="mermaid">
-sequenceDiagram
-    autonumber
-    participant H as Laptop host (Node + /master)
-    participant A as Jugador A (navegador)
-    participant B as Jugador B (ID P2P mayor)
-
-    H-->>A: P2P_PEERS + P2P_SNAPSHOT
-    H-->>B: P2P_PEERS + P2P_SNAPSHOT
-    A->>H: GET siluetas y revelaciones de la partida
-    B->>H: GET siluetas y revelaciones de la partida
-    H-->>A: recursos → caché local como data URL
-    H-->>B: recursos → caché local como data URL
-    A<<->>B: WebRTC DataChannel abierto
-
-    Note over H: Se apaga o pierde la red
-    Note over A,B: WebSocket cerrado o sin actividad del host por más de 3,2 s
-    A-->>B: HEARTBEAT · serverAlive=false
-    B-->>A: HEARTBEAT · serverAlive=false
-    Note over A,B: Tras 1,2 s de gracia y mayoría, ambos calculan el mismo líder
-    A->>A: electedLeader() = B
-    B->>B: electedLeader() = B
-    B-->>A: LEADER B
-    B->>B: startEngine(snapshot replicado)
-
-    A->>B: ACTION · GUESS ROUTER (Lamport)
-    B->>B: valida, ordena y actualiza el marcador
-    B-->>A: GAME · CORRECT_ANSWER / TICK / ROUND_END
-    B-->>A: STATE · snapshot convergente
-    Note over A,B: Clásico sigue sin HTTP y usa recursos cacheados<br/>Rondas: 25, 22, 19… hasta un mínimo de 5 s
-      </pre>
-    </div>
-  </section>
-
-  <!-- ─────────────────── 3. ANÁLISIS BAJO CONCURRENCIA ─────────────────── -->
-  <section>
-    <h2>3. Comportamiento del motor bajo concurrencia simulada <span class="eje">— Ejes 2 y 3</span></h2>
-    <p class="lead">Cuatro aciertos llegan casi simultáneamente con relojes de cliente
-      desordenados. El candado FIFO los <strong>embuda y procesa de a uno</strong>; el motor
-      asigna a cada uno un Lamport creciente que fija su posición y puntaje. Sin entrelazado,
-      sin puntajes perdidos ni duplicados.</p>
-    <div class="card">
-      <pre class="mermaid">
+  <section class='card'>
+    <h2>Topología</h2>
+    <pre class='mermaid'>
 flowchart LR
-    subgraph IN["4 aciertos casi simultáneos (Lamport de cliente desordenado)"]
-        direction TB
-        b1["Bot1 · L_cli=3"]
-        b2["Bot2 · L_cli=1"]
-        b3["Bot3 · L_cli=4"]
-        b4["Bot4 · L_cli=2"]
-    end
-    LOCK["Mutex FIFO · runExclusive()&#10;el motor asigna Lamport creciente"]
-    b1 --> LOCK
-    b2 --> LOCK
-    b3 --> LOCK
-    b4 --> LOCK
-    LOCK ==> s1["#1 · L=21 · 1000 pts"]
-    s1  ==> s2["#2 · L=22 · 775 pts"]
-    s2  ==> s3["#3 · L=23 · 550 pts"]
-    s3  ==> s4["#4 · L=24 · 325 pts"]
-    FORMULA["puntos = 100 + 900 ×&#10;(1 − (posición − 1) / N)"]
-    s4 -.-> FORMULA
-
-    classDef ok fill:#15152a,stroke:#06b6d4,color:#cdd9f5;
-    classDef res fill:#7c3aed22,stroke:#7c3aed,color:#fff;
-    class b1,b2,b3,b4,LOCK ok;
-    class s1,s2,s3,s4 res;
-      </pre>
-    </div>
-
-    <table>
-      <thead>
-        <tr><th>Orden de llegada al candado</th><th>Lamport asignado</th><th>Posición lógica</th><th>Puntaje</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>1.º en tomar el token</td><td>L = 21</td><td class="win">#1</td><td class="win">1000 pts</td></tr>
-        <tr><td>2.º (encolado)</td><td>L = 22</td><td>#2</td><td>775 pts</td></tr>
-        <tr><td>3.º (encolado)</td><td>L = 23</td><td>#3</td><td>550 pts</td></tr>
-        <tr><td>4.º (encolado)</td><td>L = 24</td><td>#4</td><td>325 pts</td></tr>
-      </tbody>
-    </table>
-
-    <ul class="findings">
-      <li><strong>Serialización explícita:</strong> toda la secuencia leer-modificar-escribir del
-        marcador corre dentro de <code>runExclusive()</code>; dos aciertos nunca se entrelazan.</li>
-      <li><strong>Sin inanición:</strong> la cola es FIFO — el que llega primero al coordinador
-        obtiene el token primero; nadie queda esperando indefinidamente.</li>
-      <li><strong>Orden determinista e independiente de la latencia:</strong> la posición la fija el
-        Lamport del motor autoritativo (<code>max(local, recibido)+1</code>), no el reloj físico del celular.</li>
-      <li><strong>Puntaje atado a la posición, no al tiempo:</strong> los puntos se calculan al cerrar
-        la ronda con N ya conocido — el 1.º recibe 1000 y el último tiende a 100.</li>
-      <li><strong>Reproducible:</strong> <code>npm run vv:concurrencia</code> ejecuta la prueba
-        automática con siete bots y valida Lamport, puntaje, unicidad y ausencia de pérdidas.</li>
-    </ul>
-    <p class="note">El clúster Node de tres nodos se conserva como modo opcional de V&amp;V.
-      En ese escenario, los aciertos de seguidores llegan vía
-      <code>N_FORWARD_GUESS</code> y atraviesan el mismo candado del coordinador: el comportamiento
-      serializado es idéntico al mostrado.</p>
+  C[Celulares] <-->|WebSocket| N1[Backend 1]
+  M[Master] <-->|WebSocket| N2[Backend 2]
+  N1 <-->|N2N| N2
+  N2 <-->|N2N| N3[Backend 3]
+  N1 <-->|N2N| N3
+  N1 --> D1[(disco 1)]
+  N2 --> D2[(disco 2)]
+  N3 --> D3[(disco 3)]
+    </pre>
   </section>
 
-</main>
+  <section class='card'>
+    <h2>Commit de una jugada</h2>
+    <pre class='mermaid'>
+sequenceDiagram
+  participant C as Celular
+  participant L as Líder
+  participant R2 as Réplica 2
+  participant R3 as Réplica 3
+  C->>L: acción + actionId + stateVersion + Lamport
+  L->>L: mutex FIFO + fsync
+  L->>R2: N_REPLICATE
+  L->>R3: N_REPLICATE
+  R2-->>L: ACK durable
+  L-->>C: broadcast confirmado 2/3
+    </pre>
+  </section>
 
-<script type="module">
+  <section class='card'>
+    <h2>Caída del líder</h2>
+    <pre class='mermaid'>
+sequenceDiagram
+  participant L as Líder caído
+  participant R2 as Réplica 2
+  participant R3 as Réplica 3
+  participant C as Cliente
+  Note over L: sin heartbeat durante 2000 ms
+  R2<<->>R3: Bully + término nuevo
+  R3->>R2: solicita estado durable
+  R2-->>R3: snapshot term,index
+  R3->>R3: restaura y reanuda timers
+  C->>R3: reconexión WebSocket
+  R3-->>C: TICK / ROUND_START
+    </pre>
+  </section>
+
+  <section class='card'>
+    <h2>Trazabilidad de la rúbrica</h2>
+    <table><thead><tr><th>Requisito</th><th>Implementación</th></tr></thead><tbody>
+      <tr><td>Canal persistente, sin polling</td><td>WebSocket cliente-backend y backend-backend</td></tr>
+      <tr><td>Exclusión mutua</td><td><code>Mutex.runExclusive</code>, cola FIFO en el líder</td></tr>
+      <tr><td>Orden causal</td><td>Lamport en acciones, mensajes N2N y eventos</td></tr>
+      <tr><td>Consistencia</td><td><code>stateVersion</code>, término, índice y ACK 2/3 antes del push</td></tr>
+      <tr><td>Heartbeat</td><td>PING cada 1000 ms; deadline de cliente/nodo en 2000 ms</td></tr>
+      <tr><td>Reconfiguración</td><td>Bully, quorum y recuperación desde disco</td></tr>
+    </tbody></table>
+  </section>
+
+  <p class='lead'>Evidencia automatizada: <code>npm run vv:concurrencia</code> y <code>npm run vv:caos</code>.</p>
+</main>
+<script type='module'>
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: 'dark',
-    themeVariables: { fontFamily: 'system-ui, sans-serif', fontSize: '14px' },
-    flowchart: { curve: 'basis' },
-    sequence: { showSequenceNumbers: false }
-  });
-</script>
-</body>
-</html>
+  mermaid.initialize({ startOnLoad:true, theme:'dark' });
+</script></body></html>

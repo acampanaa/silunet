@@ -26,6 +26,15 @@ function cleanDbs(nodeIds) {
     for (const suffix of ['', '-shm', '-wal']) {
       try { fs.unlinkSync(base + suffix); } catch { /* no existía, ok */ }
     }
+    const replicaDir = path.join(ROOT, 'data', 'replicas');
+    const replicaPrefix = `silunet-main-${id}.json`;
+    try {
+      for (const name of fs.readdirSync(replicaDir)) {
+        if (name === replicaPrefix || name.startsWith(`${replicaPrefix}.`)) {
+          try { fs.unlinkSync(path.join(replicaDir, name)); } catch { /* no existía */ }
+        }
+      }
+    } catch { /* directorio aún no creado */ }
   }
 }
 
@@ -48,7 +57,6 @@ function spawnCluster(nodes, { verbose = false } = {}) {
         // Los bots validan el motor distribuido sin depender de servicios
         // externos. Producción exige PostgreSQL para un historial consistente.
         DATABASE_URL: vvDatabaseUrl,
-        ALLOW_SQLITE_CLUSTER: vvDatabaseUrl ? '' : '1',
       },
       stdio: verbose ? 'pipe' : 'ignore',
     });
@@ -180,6 +188,10 @@ class ReconnectingClient extends EventEmitter {
 
     this.ws.on('open', () => {
       this.attempt = 0;
+      clearInterval(this._pingTimer);
+      this._pingTimer = setInterval(() => this.send({
+        type: 'PING', l: this.tick(), sentAt: Date.now(),
+      }), 1000);
       this.emit('open', url);
       this.onOpenCb && this.onOpenCb(this);
     });
@@ -192,6 +204,7 @@ class ReconnectingClient extends EventEmitter {
     });
 
     this.ws.on('close', () => {
+      clearInterval(this._pingTimer);
       this.emit('close', url);
       if (this.destroyed) return;
       this.attempt++;
@@ -213,6 +226,7 @@ class ReconnectingClient extends EventEmitter {
 
   destroy() {
     this.destroyed = true;
+    clearInterval(this._pingTimer);
     try { this.ws.close(); } catch { /* ya cerrado */ }
   }
 }

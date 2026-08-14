@@ -159,6 +159,210 @@
     .engine-chip.election.show { display: flex; }
     .engine-log { flex: 1; min-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+    /* Monitor distribuido: panel operativo por participante y nodo. */
+    .monitor-trigger {
+      appearance: none;
+      color: var(--text-faint);
+      font: inherit;
+      cursor: pointer;
+    }
+    .monitor-trigger:hover,
+    .monitor-trigger:focus-visible,
+    .monitor-trigger[aria-expanded=true] {
+      border-color: var(--secondary);
+      color: var(--text);
+      outline: none;
+    }
+    .monitor-trigger b { color: var(--tertiary); }
+    .monitor-live-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--tertiary);
+      box-shadow: 0 0 9px rgba(163,230,53,.8);
+      animation: monitorPulse 1.8s ease-in-out infinite;
+    }
+    .monitor-trigger.has-alert .monitor-live-dot {
+      background: var(--gold);
+      box-shadow: 0 0 9px rgba(251,191,36,.8);
+    }
+    @keyframes monitorPulse {
+      0%, 100% { opacity:.55; transform:scale(.85); }
+      50% { opacity:1; transform:scale(1.15); }
+    }
+
+    .monitor-overlay {
+      position: fixed; inset: 0; z-index: 45;
+      display: grid; grid-template-columns: 1fr minmax(0, 900px);
+      visibility: hidden; pointer-events: none;
+    }
+    .monitor-overlay.open { visibility: visible; pointer-events: auto; }
+    .monitor-backdrop {
+      position: absolute; inset: 0;
+      border: 0; background: rgba(7,7,15,.72);
+      backdrop-filter: blur(7px);
+      opacity: 0; transition: opacity .22s ease;
+    }
+    .monitor-overlay.open .monitor-backdrop { opacity: 1; }
+    .monitor-panel {
+      position: relative; grid-column: 2;
+      height: 100dvh; min-width: 0;
+      display: flex; flex-direction: column;
+      background:
+        linear-gradient(180deg, rgba(34,211,238,.045), transparent 180px),
+        #12121f;
+      border-left: 1px solid rgba(34,211,238,.24);
+      box-shadow: -28px 0 70px rgba(0,0,0,.42);
+      transform: translateX(100%);
+      transition: transform .3s cubic-bezier(.2,.8,.2,1);
+    }
+    .monitor-overlay.open .monitor-panel { transform: translateX(0); }
+    .monitor-panel-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+      padding: 24px 26px 18px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .monitor-kicker {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 7px;
+      color: var(--secondary); font-family: var(--font-mono);
+      font-size: .7rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    }
+    .monitor-title { font-size: clamp(1.25rem,2.4vw,1.8rem); line-height:1.15; text-wrap:balance; }
+    .monitor-intro { margin-top:7px; color:var(--text-dim); font-size:.85rem; line-height:1.45; max-width:58ch; }
+    .monitor-close {
+      width: 40px; height: 40px; flex: 0 0 auto;
+      border: 1px solid var(--border-soft); border-radius: 10px;
+      background: var(--surface); color: var(--text);
+      font: 400 1.65rem/1 var(--font-display); cursor: pointer;
+    }
+    .monitor-close:hover, .monitor-close:focus-visible {
+      border-color:var(--primary); color:var(--primary); outline:none;
+    }
+    .monitor-summary {
+      display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
+      border-bottom: 1px solid var(--border-soft);
+      background: rgba(15,15,26,.58);
+    }
+    .monitor-stat { padding:14px 18px; min-width:0; border-right:1px solid var(--border-soft); }
+    .monitor-stat:last-child { border-right:0; }
+    .monitor-stat span {
+      display:block; color:var(--text-faint); font-size:.67rem;
+      font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+    }
+    .monitor-stat b {
+      display:block; margin-top:5px; color:var(--text);
+      font: 700 1.12rem/1.2 var(--font-mono);
+      font-variant-numeric: tabular-nums; overflow:hidden; text-overflow:ellipsis;
+    }
+    .monitor-stat b.ok { color:var(--tertiary); }
+    .monitor-stat b.warn { color:var(--gold); }
+    .monitor-toolbar {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:12px 18px; border-bottom:1px solid var(--border-soft);
+    }
+    .monitor-tabs {
+      display:flex; gap:4px; padding:3px;
+      background:#0c0c16; border:1px solid var(--border-soft); border-radius:10px;
+      overflow-x:auto;
+    }
+    .monitor-tab {
+      border:0; border-radius:7px; padding:7px 11px;
+      background:transparent; color:var(--text-faint);
+      font:600 .73rem/1 var(--font-display); cursor:pointer; white-space:nowrap;
+    }
+    .monitor-tab:hover, .monitor-tab:focus-visible { color:var(--text); outline:none; }
+    .monitor-tab.active { background:var(--surface); color:var(--secondary); }
+    .monitor-updated {
+      color:var(--text-faint); font:500 .68rem/1.3 var(--font-mono);
+      font-variant-numeric:tabular-nums; white-space:nowrap;
+    }
+    .monitor-scroll { flex:1; min-height:0; overflow:auto; padding:18px; }
+    .monitor-section + .monitor-section { margin-top:22px; }
+    .monitor-section-head {
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+      margin-bottom:9px;
+    }
+    .monitor-section-title {
+      font-size:.72rem; color:var(--text-dim); letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .monitor-section-count {
+      color:var(--text-faint); font:600 .68rem/1 var(--font-mono);
+    }
+    .monitor-list { display:grid; gap:8px; }
+    .monitor-card {
+      overflow:hidden; border:1px solid var(--border-soft); border-radius:12px;
+      background:rgba(26,26,46,.72);
+      transition:border-color .18s ease, background .18s ease;
+    }
+    .monitor-card:hover { border-color:rgba(34,211,238,.34); background:rgba(29,29,51,.92); }
+    .monitor-card.offline { opacity:.7; }
+    .monitor-card-main {
+      width:100%; display:grid;
+      grid-template-columns:minmax(160px,1.4fr) repeat(3,minmax(86px,.58fr)) 28px;
+      gap:12px; align-items:center; padding:13px 14px;
+      border:0; background:transparent; color:inherit; text-align:left;
+      font:inherit; cursor:pointer;
+    }
+    .monitor-card-main:focus-visible { outline:2px solid var(--secondary); outline-offset:-2px; }
+    .monitor-identity { min-width:0; display:flex; align-items:center; gap:11px; }
+    .monitor-avatar {
+      width:36px; height:36px; border-radius:10px;
+      display:grid; place-items:center; flex:0 0 auto;
+      color:var(--secondary); background:#0e1d27; border:1px solid rgba(34,211,238,.25);
+      font:700 .82rem/1 var(--font-mono);
+    }
+    .monitor-card.master .monitor-avatar { color:var(--primary); background:#251322; border-color:rgba(240,67,155,.28); }
+    .monitor-card.node .monitor-avatar { color:var(--gold); background:#251d0c; border-color:rgba(251,191,36,.28); }
+    .monitor-name { min-width:0; }
+    .monitor-name strong {
+      display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:.86rem; font-weight:650;
+    }
+    .monitor-name small {
+      display:flex; align-items:center; gap:6px; margin-top:4px;
+      color:var(--text-faint); font:500 .67rem/1 var(--font-mono);
+    }
+    .monitor-status-dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+    .monitor-status-dot.healthy { background:var(--tertiary); box-shadow:0 0 7px rgba(163,230,53,.7); }
+    .monitor-status-dot.warning { background:var(--gold); box-shadow:0 0 7px rgba(251,191,36,.7); }
+    .monitor-status-dot.offline { background:var(--error); }
+    .monitor-metric { min-width:0; }
+    .monitor-metric span {
+      display:block; color:var(--text-faint); font-size:.61rem;
+      font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    }
+    .monitor-metric b {
+      display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      color:var(--text); font:650 .76rem/1.2 var(--font-mono); font-variant-numeric:tabular-nums;
+    }
+    .monitor-card-chevron { color:var(--text-faint); transition:transform .18s ease; }
+    .monitor-card.expanded .monitor-card-chevron { transform:rotate(90deg); color:var(--secondary); }
+    .monitor-detail {
+      display:none; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px;
+      margin:0 14px 14px; overflow:hidden; border:1px solid var(--border-soft); border-radius:9px;
+      background:var(--border-soft);
+    }
+    .monitor-card.expanded .monitor-detail { display:grid; }
+    .monitor-detail-item { min-width:0; padding:10px 11px; background:#11111e; }
+    .monitor-detail-item span {
+      display:block; color:var(--text-faint); font-size:.59rem;
+      font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    }
+    .monitor-detail-item code {
+      display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      color:#cdd8ec; font:500 .67rem/1.3 var(--font-mono);
+    }
+    .monitor-empty {
+      padding:26px 18px; border:1px dashed var(--border-soft); border-radius:12px;
+      color:var(--text-faint); text-align:center; font-size:.82rem;
+    }
+    .monitor-legend {
+      display:flex; flex-wrap:wrap; gap:12px 18px;
+      padding:11px 18px; border-top:1px solid var(--border-soft);
+      color:var(--text-faint); font:500 .65rem/1.3 var(--font-mono);
+    }
+    .monitor-legend span { display:inline-flex; align-items:center; gap:6px; }
+
     /* Cuenta regresiva "3, 2, 1, ¡YA!" antes de cada ronda — el servidor la
        manda a todos a la vez (Eje 1), no es una animación local del master. */
     .countdown-overlay {
@@ -1009,6 +1213,19 @@
       .hof-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .qr-block { max-width:100%; }
       .qr-url { overflow-wrap:anywhere; }
+      .monitor-overlay { grid-template-columns:1fr; }
+      .monitor-panel { grid-column:1; width:100%; }
+      .monitor-panel-head { padding:18px 16px 14px; }
+      .monitor-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .monitor-stat:nth-child(2) { border-right:0; }
+      .monitor-stat:nth-child(-n+2) { border-bottom:1px solid var(--border-soft); }
+      .monitor-toolbar { align-items:flex-start; flex-direction:column; padding:10px 12px; }
+      .monitor-tabs { width:100%; }
+      .monitor-tab { flex:1; }
+      .monitor-scroll { padding:12px; }
+      .monitor-card-main { grid-template-columns:minmax(150px,1fr) repeat(2,minmax(68px,.55fr)) 24px; gap:8px; padding:12px; }
+      .monitor-card-main .monitor-metric:nth-of-type(3) { display:none; }
+      .monitor-detail { grid-template-columns:repeat(2,minmax(0,1fr)); margin:0 12px 12px; }
     }
     @media (max-height: 720px) {
       header { padding-top:9px; padding-bottom:9px; }
@@ -1032,6 +1249,10 @@
       .mode-desc { min-height:42px; }
       .mode-card-bottom { padding-top:9px; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .monitor-live-dot { animation:none; }
+      .monitor-backdrop, .monitor-panel, .monitor-card-chevron { transition:none; }
+    }
   </style>
   <!-- Servida localmente (no CDN): la LAN de la feria es propia y sin salida a
        internet, así que una dependencia externa aquí rompería el QR entero. -->
@@ -1039,7 +1260,8 @@
   <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
-  <script src="/p2p.js?v=20260813-offline-assets"></script>
+  <script src="/p2p.js?v=20260813-mando"></script>
+  <script src="/distributed-monitor.js?v=20260813"></script>
 </head>
 <body>
 
@@ -1083,7 +1305,59 @@
   <div class="engine-chip election" id="e-election" title="Eje 4: algoritmo del Matón">
     <span data-silunet-icon="network"></span> Eligiendo coordinador…
   </div>
+  <button class="engine-chip monitor-trigger" id="monitor-trigger" type="button"
+          aria-expanded="false" aria-controls="monitor-overlay"
+          title="Abrir observabilidad por participante">
+    <span class="monitor-live-dot" aria-hidden="true"></span>
+    Monitor <b id="monitor-trigger-count">0/0</b>
+  </button>
   <div class="engine-log" id="e-log">Eje 3: sin colisiones todavía en esta partida.</div>
+</div>
+
+<div class="monitor-overlay" id="monitor-overlay" aria-hidden="true">
+  <button class="monitor-backdrop" id="monitor-backdrop" type="button"
+          aria-label="Cerrar monitor distribuido"></button>
+  <section class="monitor-panel" role="dialog" aria-modal="true"
+           aria-labelledby="monitor-title" tabindex="-1">
+    <div class="monitor-panel-head">
+      <div>
+        <p class="monitor-kicker"><span data-silunet-icon="network"></span> Observabilidad en vivo</p>
+        <h2 class="monitor-title" id="monitor-title">Monitor distribuido</h2>
+        <p class="monitor-intro">Latidos, latencia, réplica backend y nodo de conexión de cada participante.</p>
+      </div>
+      <button class="monitor-close" id="monitor-close" type="button" aria-label="Cerrar monitor">
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+
+    <div class="monitor-summary" id="monitor-summary">
+      <div class="monitor-stat"><span>Participantes</span><b id="monitor-stat-clients">0/0</b></div>
+      <div class="monitor-stat"><span>Nodos activos</span><b id="monitor-stat-nodes">0/0</b></div>
+      <div class="monitor-stat"><span>RTT promedio</span><b id="monitor-stat-rtt">—</b></div>
+      <div class="monitor-stat"><span>Ruta activa</span><b id="monitor-stat-route">WebSocket</b></div>
+    </div>
+
+    <div class="monitor-toolbar">
+      <div class="monitor-tabs" role="tablist" aria-label="Filtrar monitor">
+        <button class="monitor-tab active" type="button" role="tab" aria-selected="true" data-monitor-filter="all">Todos</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="players">Jugadores</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="masters">Master</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="nodes">Nodos</button>
+      </div>
+      <span class="monitor-updated" id="monitor-updated">Esperando telemetría…</span>
+    </div>
+
+    <div class="monitor-scroll" id="monitor-content">
+      <div class="monitor-empty">Los reportes aparecerán con el próximo heartbeat.</div>
+    </div>
+
+    <div class="monitor-legend" aria-label="Leyenda de estados">
+      <span><i class="monitor-status-dot healthy"></i> saludable</span>
+      <span><i class="monitor-status-dot warning"></i> latido retrasado</span>
+      <span><i class="monitor-status-dot offline"></i> desconectado</span>
+      <span>Ping 1 s · timeout cliente 2 s · peer 3,5 s</span>
+    </div>
+  </section>
 </div>
 
 <!-- Modo Relajo: reloj comunitario que solo se alarga cuando alguien acierta -->
@@ -1557,6 +1831,10 @@
   let currentMode = 'clasico';
   let currentStackState = null;
   let currentStackTime = 18;
+  let stateVersion = 0;
+  let controlLamport = 0;
+  let actionSequence = 0;
+  const versionedControlActions = new Set(['START_GAME', 'END_GAME']);
 
   // ── WebSocket con reconexión automática al clúster (Eje 4) ────────────────────
   // Misma lógica que /play: si el nodo al que está pegada ESTA pantalla (la que
@@ -1576,6 +1854,10 @@
   });
   window.__silunetP2P = p2p;
   p2p.attachSignaling(sendServer);
+  const distributedMonitor = window.SilunetDistributedMonitor.create({
+    getP2P: () => p2p,
+  });
+  window.__silunetMonitor = distributedMonitor;
 
   function buildNodeList() {
     const self = 'ws://' + location.host;
@@ -1585,6 +1867,7 @@
   }
 
   function connectWS() {
+    p2p.setBackendUrl(nodeList[nodeIdx]);
     ws = new WebSocket(nodeList[nodeIdx]);
 
     ws.onopen = () => {
@@ -1595,7 +1878,13 @@
       send({ type: 'MASTER_JOIN' });
       p2p.register(null, 'Master');
       clearInterval(pingTimer);
-      pingTimer = setInterval(() => send({ type: 'PING' }), 1000);
+      const sendHeartbeat = () => send({
+        type: 'PING',
+        sentAt: Date.now(),
+        telemetry: p2p.telemetry(),
+      });
+      sendHeartbeat();
+      pingTimer = setInterval(sendHeartbeat, 1000);
       send({ type: 'GET_HALL_OF_FAME' }); // v2.1: salón de la fama al conectar
     };
 
@@ -1619,6 +1908,8 @@
 
   function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
+    if (Number.isSafeInteger(msg.stateVersion)) stateVersion = Math.max(stateVersion, msg.stateVersion);
+    if (Number.isSafeInteger(msg.lamport)) controlLamport = Math.max(controlLamport, msg.lamport) + 1;
     if (p2p.handleServerMessage(msg)) return;
     dispatchGameMessage(msg);
   }
@@ -1641,9 +1932,16 @@
       case 'RANKING':        handleRanking(msg);       break;
       case 'CLUSTER_STATE':  renderNodes(msg.nodes, msg.electionInProgress); break;
       case 'PLAYER_LEFT':    showNotif(`${msg.nick}: Desconectado`, 4000); break;
+      case 'STATE_STALE':    showNotif('El estado cambió; el control fue resincronizado.', 3500); break;
+      // Eje 4: un jugador quedó al mando porque no había ninguna pantalla
+      // maestra viva. Al reconectar esta pantalla el rol se retira solo.
+      case 'HOST_CHANGED':
+        if (msg.hostId) pushEngineLog(`Eje 4: anfitrión ${msg.hostNick || msg.hostId}`);
+        break;
       case 'ENGINE_STATE':   handleEngineState(msg);   break;
       case 'MUTEX_QUEUED':   handleMutexQueued(msg);   break;
       case 'HALL_OF_FAME':   handleHallOfFame(msg);    break;
+      case 'DISTRIBUTED_MONITOR': distributedMonitor.update(msg.snapshot); break;
     }
   }
 
@@ -1652,22 +1950,74 @@
   }
 
   function send(msg) {
+    if (versionedControlActions.has(msg.type)) {
+      msg = Object.assign({}, msg, {
+        stateVersion: stateVersion,
+        actionId: `master-${Date.now()}-${++actionSequence}`,
+        lamport: ++controlLamport,
+      });
+    }
     sendServer(msg);
   }
 
+  function forceBackendReconnect() {
+    const abandoned = ws;
+    if (!abandoned || abandoned.readyState > 1) return;
+    clearInterval(pingTimer);
+    clearTimeout(reconnectTimer);
+    abandoned.onclose = null;
+    try { abandoned.close(); } catch (_) {}
+    if (nodeList.length > 1) nodeIdx = (nodeIdx + 1) % nodeList.length;
+    reconnectAttempt = 0;
+    reconnectTimer = setTimeout(connectWS, 100);
+  }
+
   function handleP2PStatus(status) {
+    // Eje 4: el clúster volvió. MASTER_JOIN hace que el servidor reenvíe el
+    // estado en curso (ronda, conteo, salud del clúster) a esta pantalla.
+    if (status.type === 'server-back') {
+      hideReconnecting();
+      sendServer({ type: 'MASTER_JOIN' });
+      showNotif('Servidor de vuelta · la partida regresa al clúster', 4500);
+      return;
+    }
+    // Eje 4: esta pantalla se quedó SOLA. Pasa siempre que se le corta la red
+    // a la máquina que proyecta: se lleva por delante el servidor (si corre
+    // aquí) y también sus propios canales WebRTC, que iban por la misma Wi-Fi.
+    // Una pantalla aislada no puede coordinar nada —el rol de líder P2P es de
+    // los jugadores— pero sí tiene que DECIRLO en vez de congelarse muda.
+    if (status.type === 'no-leader') {
+      forceBackendReconnect();
+      setBannerText('Esta pantalla se quedó sin red · la partida no puede continuar desde aquí');
+      document.getElementById('reconnect-banner').classList.add('show');
+      showNotif('Réplica sin respuesta: buscando otro backend del clúster.', 6000);
+      return;
+    }
+    const sinContinuidad = {
+      'no-snapshot':      'Servidor fuera · no se alcanzó a replicar la partida',
+      'unsupported-mode': 'Servidor fuera · este modo no continúa sin servidor',
+      'not-running':      'Servidor fuera · no había ronda en curso que continuar',
+    }[status.type];
+    if (sinContinuidad) {
+      setBannerText(sinContinuidad);
+      document.getElementById('reconnect-banner').classList.add('show');
+      return;
+    }
     if (status.type !== 'failover') return;
     currentMode = 'clasico';
-    const banner = document.getElementById('reconnect-banner');
-    const text = banner?.querySelector('span:last-child');
-    if (text) text.textContent = 'Servidor fuera · la partida continúa por WebRTC';
-    banner?.classList.add('show');
+    setBannerText('Servidor fuera · la partida continúa por WebRTC');
+    document.getElementById('reconnect-banner').classList.add('show');
     showNotif(
       status.isLeader
         ? 'Failover P2P: un jugador asumió la coordinación.'
         : 'Failover P2P activo: la partida continúa sin la laptop servidora.',
       5000,
     );
+  }
+
+  function setBannerText(texto) {
+    const text = document.getElementById('reconnect-banner').querySelector('span:last-child');
+    if (text) text.textContent = texto;
   }
 
   // El banner solo tiene sentido tras la primera conexión exitosa; el intento
@@ -2370,6 +2720,11 @@
         <span class="rank-score">${e.score} pts</span>
       </div>`
     ).join('') || '<p style="color:#6b7280;font-size:0.875rem">Sin jugadores aún.</p>';
+    entries.forEach((entry, index) => {
+      if (entry.connected !== false) return;
+      const nick = document.querySelectorAll('#m-ranking .rank-nick')[index];
+      if (nick) nick.textContent += ' · Desconectado';
+    });
   }
 
   function setPhase(p) {

@@ -126,6 +126,11 @@ export class Game extends EventEmitter {
   private countdownTimer?: ReturnType<typeof setTimeout>;
   private roundGapTimer?: ReturnType<typeof setTimeout>;
 
+  // Eje 4 (capa navegador): jugador promovido a ANFITRIÓN de la sala. Solo
+  // existe cuando no queda ninguna pantalla maestra viva; es quien puede
+  // arrancar o cortar una partida para que el sistema no muera con el master.
+  private hostId: string | null = null;
+
   // Palabras usadas en partidas anteriores (de la más antigua a la más reciente),
   // para no repetirlas en la siguiente. Viaja en el snapshot para que un
   // coordinador promovido por Bully no pierda la memoria (Eje 4).
@@ -150,6 +155,8 @@ export class Game extends EventEmitter {
 
   // Eje 3: candado lógico que serializa el acceso al marcador compartido
   private readonly scoreboardLock = new Mutex('marcador');
+  private processedActionIds = new Set<string>();
+  private static readonly ACTION_ID_WINDOW = 1000;
 
   constructor() {
     super();
@@ -167,6 +174,63 @@ export class Game extends EventEmitter {
   // (conserva puntaje) pero no debe inflar el contador que ve la pantalla maestra.
   getPlayerCount() { return [...this.players.values()].filter(p => p.connected !== false).length; }
   getPlayer(id: string) { return this.players.get(id); }
+  getHostId()           { return this.hostId; }
+
+  /** Registra una accion de cliente una sola vez, incluso tras restaurar replica. */
+  acceptAction(actionId?: string): boolean {
+    if (!actionId) return true; // compatibilidad con clientes de prueba antiguos
+    if (this.processedActionIds.has(actionId)) return false;
+    this.processedActionIds.add(actionId);
+    while (this.processedActionIds.size > Game.ACTION_ID_WINDOW) {
+      const oldest = this.processedActionIds.values().next().value as string | undefined;
+      if (!oldest) break;
+      this.processedActionIds.delete(oldest);
+    }
+    return true;
+  }
+
+  /**
+   * Eje 4 — elección de anfitrión entre navegadores.
+   *
+   * Mismo criterio que el Matón (Bully) usa entre nodos —gana el id más alto—
+   * y la misma regla de estabilidad: al anfitrión vigente NO se lo destrona
+   * porque entre alguien "mayor"; solo se reelige cuando el actual ya no está
+   * conectado. Así el rol no salta de celular en celular cada vez que alguien
+   * escanea el QR.
+   */
+  pickHostCandidate(): string | null {
+    const current = this.hostId ? this.players.get(this.hostId) : undefined;
+    if (current && current.connected !== false) return current.id;
+    let elected: string | null = null;
+    for (const player of this.players.values()) {
+      if (player.connected === false) continue;
+      if (elected === null || player.id > elected) elected = player.id;
+    }
+    return elected;
+  }
+
+  /**
+   * Publica el anfitrión vigente (null = manda la pantalla maestra).
+   * Devuelve true solo si de verdad cambió, para no difundir ruido cada vez
+   * que el coordinador reevalúa la sala.
+   */
+  setHost(hostId: string | null, masterOnline: boolean): boolean {
+    if (this.hostId === hostId) return false;
+    this.hostId = hostId;
+    this.broadcast(this.hostState(masterOnline));
+    return true;
+  }
+
+  /** Estado de anfitrión para un navegador que acaba de conectarse. */
+  hostState(masterOnline: boolean): S2C {
+    const host = this.hostId ? this.players.get(this.hostId) : undefined;
+    return {
+      type: 'HOST_CHANGED',
+      hostId: this.hostId,
+      hostNick: host?.nick ?? null,
+      masterOnline,
+    };
+  }
 
   private rankedPlayers(): Player[] {
     const boards = new Map((this.stack?.boards ?? []).map(board => [board.playerId, board]));
@@ -188,7 +252,13 @@ export class Game extends EventEmitter {
 
   getRanking(): RankEntry[] {
     return this.rankedPlayers()
-      .map(p => ({ nick: p.nick, score: p.score, avatarId: p.avatarId ?? 0, avatarKey: p.avatarKey }));
+      .map(p => ({
+        nick: p.nick,
+        score: p.score,
+        connected: p.connected !== false,
+        avatarId: p.avatarId ?? 0,
+        avatarKey: p.avatarKey,
+      }));
   }
 
   /** Pulso del motor distribuido para el panel didáctico de /master (Eje 2 + Eje 3). */
@@ -253,6 +323,7 @@ export class Game extends EventEmitter {
       currentRoundIndex: this.currentRoundIndex,
       round:             this.round ?? null,
       players:           [...this.players.values()].map(p => ({ ...p })),
+      hostId:            this.hostId,
       lamport:           this.clock.value,
       votes:             Object.fromEntries(this.votes),
       difficultyVotes:   Object.fromEntries(this.difficultyVotes),
@@ -263,6 +334,7 @@ export class Game extends EventEmitter {
       sharedClock:       this.sharedClock,
       cleared:           this.cleared,
       stack:             this.cloneStackState(),
+      processedActionIds: [...this.processedActionIds],
     };
   }
 
@@ -281,6 +353,7 @@ export class Game extends EventEmitter {
       ? { ...s.round, hintedPlayerIds: s.round.hintedPlayerIds ?? [] }
       : undefined;
     this.players           = new Map(s.players.map(p => [p.id, { ...p }]));
+    this.hostId            = s.hostId ?? null;
     this.clock.merge(s.lamport);
     this.votes             = new Map(Object.entries(s.votes ?? {}));
     this.difficultyVotes   = new Map(Object.entries(s.difficultyVotes ?? {}));
@@ -290,6 +363,7 @@ export class Game extends EventEmitter {
     this.mode              = s.mode ?? 'clasico';
     this.sharedClock       = s.sharedClock ?? 0;
     this.cleared           = s.cleared ?? 0;
+    this.processedActionIds = new Set((s.processedActionIds ?? []).slice(-Game.ACTION_ID_WINDOW));
     this.stack             = s.stack ? {
       ...s.stack,
       boards: (s.stack.boards ?? []).map(board => ({
@@ -473,7 +547,10 @@ export class Game extends EventEmitter {
       }
       this.broadcast({ type: 'PLAYER_LEFT', nick: p.nick });
     }
-    if (changed) this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
+    if (changed) {
+      this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
+      this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
+    }
   }
 
   removePlayer(id: string) {
@@ -492,6 +569,7 @@ export class Game extends EventEmitter {
     // Eje 4: avisar al stand para mostrar "Jugador X: Desconectado"
     this.broadcast({ type: 'PLAYER_LEFT', nick: player.nick });
     this.broadcast({ type: 'PLAYER_COUNT', count: this.getPlayerCount() });
+    this.broadcast({ type: 'RANKING', entries: this.getRanking(), final: false });
   }
 
   // --- Control de partida ---

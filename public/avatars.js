@@ -55,7 +55,8 @@
     const safeAlt = String(alt).replace(/[&<>"']/g, ch => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[ch]);
-    return `<img class="avatar avatar-photo" src="/api/avatar/${key}"
+    const assetBase = window.__silunetAssetBase || '';
+    return `<img class="avatar avatar-photo" src="${assetBase}/api/avatar/${key}"
       alt="${safeAlt}" width="96" height="96" decoding="async"
       style="width:${size};height:${size}">`;
   }

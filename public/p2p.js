@@ -2,14 +2,42 @@
   'use strict';
 
   const HEARTBEAT_MS = 1000;
+  // La autoridad vive exclusivamente en el clúster de backends. WebRTC queda
+  // para telemetría/señalización, nunca para ejecutar el motor del juego.
+  const BACKEND_CLUSTER_ONLY = true;
   const PEER_TIMEOUT_MS = 3500;
-  const SERVER_HEARTBEAT_TIMEOUT_MS = 3200;
+  const SERVER_HEARTBEAT_TIMEOUT_MS = 2000;
   const SERVER_DOWN_GRACE_MS = 1200;
+  // Para VOLVER del failover se exige una ventana más larga que para entrar:
+  // salir de la malla es una operación cara (se abandona el estado P2P), así
+  // que un parpadeo de Wi-Fi no debe provocarla.
+  const SERVER_BACK_GRACE_MS = 2500;
   const ROUND_GAP_MS = 4000;
   const MAX_SEEN_EVENTS = 500;
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  const OFFLINE_RESULTS_KEY = 'silunet_offline_results';
+
+  function readStoredResults() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(OFFLINE_RESULTS_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function writeStoredResults(results) {
+    try { localStorage.setItem(OFFLINE_RESULTS_KEY, JSON.stringify(results)); } catch (_) {}
+  }
+
+  function makeGameId() {
+    return crypto.randomUUID
+      ? crypto.randomUUID()
+      : 'p2p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   }
 
   function makePeerId() {
@@ -37,10 +65,18 @@
       this.known = new Map();
       this.serverAlive = true;
       this.lastServerSeen = Date.now();
+      this.serverRttMs = null;
       this.serverClosedAt = 0;
+      // Instante desde el que el servidor volvió a dar señales ESTANDO en
+      // failover. Es lo que mide la ventana de regreso.
+      this.serverBackSince = 0;
       this.failoverActive = false;
+      this.isolatedNotified = false;
       this.leaderId = null;
       this.state = null;
+      // Palabras de reserva que manda el servidor: es lo único con lo que el
+      // líder de la malla puede arrancar una partida NUEVA estando aislado.
+      this.spareRounds = [];
       this.serverRevision = -1;
       this.stateVersion = 0;
       this.eventSeq = 0;
@@ -52,6 +88,12 @@
       this.assetPending = new Map();
       this.offlineAssetsReady = false;
       this.assetSetKey = '';
+      this.assetBase = '';
+
+      // Partidas jugadas SIN servidor, esperando subir al historial. Viven en
+      // localStorage: si el celular se recarga antes de que vuelva el clúster,
+      // el resultado no se pierde.
+      this.offlineResults = readStoredResults();
 
       this.heartbeatTimer = setInterval(() => this.sendHeartbeat(), HEARTBEAT_MS);
       this.monitorTimer = setInterval(() => this.monitor(), 500);
@@ -61,10 +103,20 @@
       this.signalSend = sendFunction;
     }
 
+    setBackendUrl(webSocketUrl) {
+      this.assetBase = String(webSocketUrl || '')
+        .replace(/^wss:/, 'https:')
+        .replace(/^ws:/, 'http:')
+        .replace(/\/$/, '');
+      window.__silunetAssetBase = this.assetBase;
+    }
+
     register(playerId, nick) {
       if (playerId) this.playerId = playerId;
       if (nick) this.nick = nick;
       this.serverOpened();
+      // Cada reconexión es una oportunidad de subir lo que se jugó sin servidor.
+      this.flushOfflineResults();
       this.sendSignal({
         type: 'P2P_REGISTER',
         peerId: this.peerId,
@@ -82,17 +134,29 @@
       }
     }
 
+    // La vitalidad del servidor se sigue midiendo SIEMPRE, también durante el
+    // failover: si dejara de medirse (como antes), nada podría detectar que el
+    // clúster volvió y el celular se quedaría en la malla P2P para siempre.
+    // Que el servidor esté vivo NO significa que lo estemos usando: eso lo dice
+    // `serverAlive && !failoverActive`, que es lo que viaja a los peers.
     serverHeartbeat() {
-      if (this.failoverActive) return;
       this.lastServerSeen = Date.now();
       this.serverAlive = true;
       this.serverClosedAt = 0;
+      this.isolatedNotified = false; // el servidor contesta: no estamos aislados
+      if (this.failoverActive && !this.serverBackSince) this.serverBackSince = Date.now();
     }
 
     serverClosed() {
-      if (this.failoverActive) return;
       this.serverAlive = false;
+      this.serverBackSince = 0;
       if (!this.serverClosedAt) this.serverClosedAt = Date.now();
+      if (BACKEND_CLUSTER_ONLY && !this.isolatedNotified) {
+        this.isolatedNotified = true;
+        this.onStatus({ type: 'no-leader', openPeers: this.openPeerIds().length });
+      }
+      // Ya estando en failover el aviso sobra: el banner lleva rato puesto.
+      if (this.failoverActive) return;
       this.onStatus({ type: 'server-down', openPeers: this.openPeerIds().length });
     }
 
@@ -101,7 +165,12 @@
       // Cualquier mensaje autentico del servidor demuestra vida. PONG cubre
       // especialmente las fases donde el juego no esta emitiendo eventos.
       this.serverHeartbeat();
-      if (msg.type === 'PONG') return true;
+      if (msg.type === 'PONG') {
+        if (Number.isFinite(Number(msg.clientTs))) {
+          this.serverRttMs = Math.max(0, Math.min(30000, Date.now() - Number(msg.clientTs)));
+        }
+        return true;
+      }
       if (msg.type === 'P2P_PEERS') {
         this.handleRoster(msg);
         return true;
@@ -115,16 +184,26 @@
           this.serverRevision = msg.revision;
           this.stateVersion = Math.max(this.stateVersion, msg.revision);
           this.state = clone(msg.snapshot);
+          // Munición para arrancar una partida nueva sin servidor.
+          if (Array.isArray(msg.spare) && msg.spare.length) this.spareRounds = clone(msg.spare);
           void this.cacheSnapshotAssets(this.state);
         }
         return true;
       }
+      // Mientras dura el failover el motor P2P es la ÚNICA autoridad de esta
+      // pantalla. El socket puede seguir vivo (o volver antes de que se resuelva
+      // el regreso) y el servidor mandaría ROUND_START, TICK, RANKING… contra el
+      // mismo DOM que está pintando el líder de la malla: dos motores peleando
+      // por la misma pantalla. Se descartan hasta que el regreso se confirme.
+      if (this.failoverActive) return true;
       return false;
     }
 
     snapshotAssetUrls(snapshot) {
       if (!snapshot) return [];
-      const entries = [...(snapshot.rounds || [])];
+      // El lote de reserva se precachea junto con la partida en curso: si el
+      // servidor cae, sus imágenes ya no se pueden descargar de ningún lado.
+      const entries = [...(snapshot.rounds || []), ...this.spareRounds];
       if (snapshot.round?.wordEntry) entries.push(snapshot.round.wordEntry);
       const urls = [];
       for (const entry of entries) {
@@ -136,9 +215,17 @@
     }
 
     cacheSnapshotAssets(snapshot) {
-      const hasRounds = Array.isArray(snapshot?.rounds) && snapshot.rounds.length > 0;
-      if (!hasRounds) return Promise.resolve(false);
+      // Se cachea por URLs, no por "¿hay partida en curso?": en el lobby
+      // `snapshot.rounds` está vacío pero el LOTE DE RESERVA ya llegó, y es
+      // justo ahí donde puede caer el servidor. Si se espera a que arranque la
+      // partida, las imágenes de la reserva no se descargan nunca.
       const urls = this.snapshotAssetUrls(snapshot);
+      if (!urls.length) {
+        // Todo viene embebido (siluetas SVG inline): no hay nada que bajar.
+        this.assetSetKey = '';
+        this.offlineAssetsReady = true;
+        return Promise.resolve(true);
+      }
       const key = urls.join('|');
       if (key === this.assetSetKey && this.offlineAssetsReady) return Promise.resolve(true);
       if (key !== this.assetSetKey) {
@@ -183,7 +270,11 @@
     }
 
     assetUrl(url) {
-      return this.assetCache.get(url) || url || null;
+      const cached = this.assetCache.get(url);
+      if (cached) return cached;
+      if (!url) return null;
+      if (/^(?:data:|blob:|https?:)/i.test(url)) return url;
+      return this.assetBase ? this.assetBase + (url.startsWith('/') ? url : '/' + url) : url;
     }
 
     renderSilhouette(container, message) {
@@ -347,6 +438,9 @@
         playerId: this.playerId,
         nick: this.nick,
         serverAlive: this.serverAlive && !this.failoverActive,
+        // "Lo veo", distinto de "lo estoy usando": es lo que permite acordar
+        // el regreso del failover, cuando serverAlive es false por definición.
+        serverReachable: this.serverAlive,
       };
     }
 
@@ -365,7 +459,18 @@
           playerId: msg.playerId || previous.playerId || null,
           nick: msg.nick || previous.nick || null,
         });
-        if (peer) peer.serverAlive = msg.serverAlive === true;
+        if (peer) {
+          peer.serverAlive = msg.serverAlive === true;
+          peer.serverReachable = msg.serverReachable === true;
+        }
+        return;
+      }
+
+      // Un peer avisa que el clúster volvió. Solo se le cree si este celular
+      // también lo está viendo: así un peer confundido no puede sacar a nadie
+      // de la malla mientras el servidor sigue caído para el resto.
+      if (msg.kind === 'SERVER_BACK') {
+        if (this.failoverActive && this.serverAlive) this.deactivateFailover();
         return;
       }
 
@@ -435,6 +540,27 @@
         .map(([peerId]) => peerId);
     }
 
+    telemetry() {
+      const knownPlayers = [...this.known.values()].filter(info => info.role === 'player').length
+        + (this.role === 'player' ? 1 : 0);
+      const openPlayerPeers = [...this.peers.entries()].filter(([peerId, peer]) =>
+        this.known.get(peerId)?.role === 'player' && peer.dc?.readyState === 'open'
+      ).length;
+      const expectedPlayerPeers = knownPlayers - (this.role === 'player' ? 1 : 0);
+      return {
+        serverRttMs: this.serverRttMs == null ? undefined : Math.round(this.serverRttMs),
+        openPeers: this.openPeerIds().length,
+        openPlayerPeers: openPlayerPeers,
+        knownPlayers: knownPlayers,
+        meshReady: knownPlayers >= 2 && openPlayerPeers >= expectedPlayerPeers,
+        failoverActive: this.failoverActive,
+        serverAlive: this.serverAlive && !this.failoverActive,
+        leaderId: this.leaderId,
+        stateVersion: this.stateVersion,
+        offlineAssetsReady: this.offlineAssetsReady,
+      };
+    }
+
     reportMesh() {
       const players = [...this.known.values()].filter(info => info.role === 'player').length
         + (this.role === 'player' ? 1 : 0);
@@ -459,6 +585,7 @@
         playerId: this.playerId,
         nick: this.nick,
         serverAlive: this.serverAlive && !this.failoverActive,
+        serverReachable: this.serverAlive,
         leaderId: this.leaderId,
         stateVersion: this.stateVersion,
       });
@@ -478,19 +605,72 @@
         }
       }
 
+      // Corre en los dos modos: es la única forma de enterarse de que el
+      // servidor se calló, y también de que dejó de estarlo.
+      if (this.serverAlive && now - this.lastServerSeen > SERVER_HEARTBEAT_TIMEOUT_MS) {
+        this.serverClosed();
+      }
+
       if (!this.failoverActive) {
-        if (this.serverAlive && now - this.lastServerSeen > SERVER_HEARTBEAT_TIMEOUT_MS) {
-          this.serverClosed();
+        if (!this.serverAlive && now - this.serverClosedAt >= SERVER_DOWN_GRACE_MS) {
+          if (BACKEND_CLUSTER_ONLY) {
+            if (!this.isolatedNotified) {
+              this.isolatedNotified = true;
+              this.onStatus({ type: 'no-leader', openPeers: this.openPeerIds().length });
+            }
+            return;
+          }
+          if (this.hasServerDownMajority()) {
+            this.activateFailover(this.electedLeader());
+          } else if (!this.isolatedNotified) {
+            // Servidor caído y NADIE con quien acordar el failover: este
+            // dispositivo se quedó solo en la red. Le pasa siempre a la
+            // pantalla maestra cuando se le corta el Wi-Fi a su máquina —se
+            // lleva por delante el servidor y también sus canales WebRTC—, y
+            // hasServerDownMajority() no puede decidir con cero reportes.
+            // Sin este aviso la pantalla se congelaba muda para siempre.
+            this.isolatedNotified = true;
+            this.onStatus({ type: 'no-leader', openPeers: this.openPeerIds().length });
+          }
         }
-        if (!this.serverAlive && now - this.serverClosedAt >= SERVER_DOWN_GRACE_MS && this.hasServerDownMajority()) {
-          this.activateFailover(this.electedLeader());
-        }
+        return;
+      }
+
+      // Eje 4: regreso al clúster. Se exige la misma clase de acuerdo que para
+      // entrar —mayoría de jugadores viendo lo mismo— para no partir la sala en
+      // dos mitades, unas jugando por WebSocket y otras por WebRTC.
+      if (
+        this.serverAlive
+        && this.serverBackSince
+        && now - this.serverBackSince >= SERVER_BACK_GRACE_MS
+        && this.hasServerUpMajority()
+      ) {
+        this.deactivateFailover();
         return;
       }
 
       if (!this.leaderId || !this.isEligibleAlive(this.leaderId)) {
         this.activateFailover(this.electedLeader());
       }
+    }
+
+    /**
+     * ¿La mayoría de los jugadores de la malla vuelve a ver el servidor?
+     *
+     * Espejo de hasServerDownMajority(). Sin peers abiertos manda la propia
+     * vista: un celular solo en la malla no tiene con quién acordar nada, y
+     * dejarlo aislado del clúster que sí está vivo sería lo peor de las dos.
+     */
+    hasServerUpMajority() {
+      const reports = [];
+      if (this.role === 'player') reports.push(this.serverAlive === true);
+      for (const [peerId, peer] of this.peers) {
+        const info = this.known.get(peerId);
+        if (info?.role !== 'player' || peer.dc?.readyState !== 'open') continue;
+        reports.push(peer.serverReachable === true);
+      }
+      if (reports.length === 0) return this.serverAlive === true;
+      return reports.filter(Boolean).length > reports.length / 2;
     }
 
     hasServerDownMajority() {
@@ -525,13 +705,23 @@
     }
 
     activateFailover(leaderId) {
+      if (BACKEND_CLUSTER_ONLY) return;
+      // Sin candidatos no hay nada que activar: este dispositivo quedó aislado
+      // (típico de la pantalla maestra cuando se le corta la red: se lleva por
+      // delante sus propios canales WebRTC, que iban por la misma Wi-Fi).
+      // Se avisa UNA vez: monitor() reintenta cada 500 ms.
       if (!leaderId) {
-        this.onStatus({ type: 'no-leader' });
+        if (!this.isolatedNotified) {
+          this.isolatedNotified = true;
+          this.onStatus({ type: 'no-leader', openPeers: this.openPeerIds().length });
+        }
         return;
       }
+      this.isolatedNotified = false;
       const changed = !this.failoverActive || this.leaderId !== leaderId;
       this.failoverActive = true;
       this.serverAlive = false;
+      this.serverBackSince = 0;
       this.leaderId = leaderId;
       this.stopEngine();
       if (changed) {
@@ -549,8 +739,36 @@
       }
     }
 
+    /**
+     * Regreso al clúster (Eje 4). El servidor recupera la autoridad SIN
+     * negociar: durante el corte pudo perfectamente seguir jugándose la partida
+     * de verdad —lo que se cayó bien pudo ser el Wi-Fi de este celular, no el
+     * clúster— así que la réplica P2P se descarta entera y se vuelve a partir
+     * del snapshot autoritativo. Lo que se jugó en la malla mientras tanto no
+     * se sube al servidor.
+     */
+    deactivateFailover() {
+      if (!this.failoverActive) return;
+      this.stopEngine();
+      this.failoverActive = false;
+      this.leaderId = null;
+      this.isolatedNotified = false;
+      this.serverBackSince = 0;
+      this.serverClosedAt = 0;
+      this.pendingActions.length = 0;
+      this.seenEvents.clear();
+      // Se acepta el próximo P2P_SNAPSHOT aunque nuestra versión P2P sea más
+      // alta: la del servidor es la que vale, no la más avanzada.
+      this.state = null;
+      this.serverRevision = -1;
+      this.stateVersion = 0;
+      this.broadcast({ kind: 'SERVER_BACK', peerId: this.peerId });
+      this.flushOfflineResults();
+      this.onStatus({ type: 'server-back', subidas: this.offlineResults.length === 0 });
+    }
+
     handlesLiveAction() {
-      return this.failoverActive || !this.serverAlive;
+      return !BACKEND_CLUSTER_ONLY && (this.failoverActive || !this.serverAlive);
     }
 
     submitAction(action) {
@@ -803,6 +1021,88 @@
       this.emitRanking(true);
       this.syncState();
       this.stopEngine();
+      this.rememberOfflineResult();
+    }
+
+    /**
+     * ¿Puede este dispositivo arrancar una partida SIN servidor?
+     *
+     * Solo el líder electo de la malla, y solo si tiene munición (el lote de
+     * reserva que mandó el servidor mientras estaba vivo) y no hay ya una
+     * partida corriendo.
+     */
+    canStartOfflineGame() {
+      if (!this.failoverActive || this.leaderId !== this.peerId) return false;
+      if (!this.state || !this.spareRounds.length) return false;
+      const phase = this.state.phase;
+      return phase !== 'countdown' && phase !== 'playing' && phase !== 'roundEnd' && phase !== 'voting';
+    }
+
+    /**
+     * El líder toma el mando que normalmente tiene /master y arranca una
+     * partida nueva sobre la malla. Sin servidor no hay votación de categoría:
+     * se juega directo con el lote de reserva.
+     */
+    startOfflineGame() {
+      if (!this.canStartOfflineGame()) return false;
+      this.stopEngine();
+      this.state.mode = 'clasico';
+      this.state.currentGameId = makeGameId();
+      this.state.rounds = clone(this.spareRounds);
+      this.state.currentRoundIndex = -1;
+      this.state.round = null;
+      this.state.phase = 'countdown';
+      for (const player of this.state.players) player.score = 0;
+      this.emitRanking(false);
+      this.syncState();
+      this.nextRound();
+      return true;
+    }
+
+    /**
+     * Guarda el podio de una partida jugada en la malla para subirlo cuando
+     * vuelva el clúster. Se conserva el token de cada jugador porque es lo que
+     * la base usa para atribuir la partida a una identidad.
+     */
+    rememberOfflineResult() {
+      if (this.leaderId !== this.peerId || !this.state) return;
+      const medallas = ['oro', 'plata', 'bronce'];
+      const standings = [...this.state.players]
+        .sort((a, b) => b.score - a.score)
+        .map((player, index) => ({
+          token: player.token,
+          nick: player.nick,
+          score: player.score,
+          position: index + 1,
+          medalla: medallas[index] || null,
+        }))
+        .filter(standing => standing.token);
+      if (!standings.length) return;
+      const result = {
+        gameId: this.state.currentGameId || makeGameId(),
+        mode: 'clasico',
+        totalRounds: this.state.rounds.length,
+        standings: standings,
+      };
+      if (this.offlineResults.some(item => item.gameId === result.gameId)) return;
+      this.offlineResults.push(result);
+      writeStoredResults(this.offlineResults);
+      this.onStatus({ type: 'offline-result', pending: this.offlineResults.length });
+    }
+
+    /**
+     * Sube al servidor las partidas jugadas sin él. Se reintenta en cada
+     * reconexión; el servidor deduplica por gameId, así que repetir es barato
+     * y perder un resultado no lo es.
+     */
+    flushOfflineResults() {
+      if (!this.offlineResults.length || !this.signalSend) return;
+      const quedan = [];
+      for (const result of this.offlineResults) {
+        if (this.signalSend({ type: 'OFFLINE_RESULT', result: result }) !== true) quedan.push(result);
+      }
+      this.offlineResults = quedan;
+      writeStoredResults(this.offlineResults);
     }
 
     ranking() {

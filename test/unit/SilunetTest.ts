@@ -1,5 +1,5 @@
 /**
- * Pruebas unitarias de Silunet — 12 pruebas sobre los tres módulos donde vive
+ * Pruebas unitarias de Silunet sobre los módulos donde vive
  * la lógica cuyo fallo arruinaría una partida:
  *
  *   lamport.ts   ordena los aciertos entre nodos
@@ -9,10 +9,16 @@
  * Ejecutar con:  npm run test:unit
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, test } from 'node:test';
 import { LamportClock } from '../../src/lamport';
 import { Mutex } from '../../src/mutex';
-import { classicRoundSeconds } from '../../src/game';
+import { Game, classicRoundSeconds } from '../../src/game';
+import { DistributedMonitoring } from '../../src/monitoring';
+import { ReplicaStore } from '../../src/replicaStore';
+import { MonitorParticipant, S2C } from '../../src/types';
 import {
   DIFFICULTIES,
   DIFFICULTY_LABEL,
@@ -23,6 +29,26 @@ import {
   getMixedQueue,
   getRandomRounds,
 } from '../../src/wordBank';
+
+describe('Réplica durable del backend', () => {
+  test('sobrevive al reinicio y cerca términos antiguos', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'silunet-replica-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const snapshot = new Game().snapshot();
+
+    const firstProcess = new ReplicaStore('node2', 'test-cluster', directory);
+    firstProcess.commit({ leaderId: 'node1', term: 4, index: 21, snapshot });
+
+    const restartedProcess = new ReplicaStore('node2', 'test-cluster', directory);
+    const loaded = restartedProcess.load();
+    assert.equal(loaded?.index, 21);
+    assert.equal(loaded?.term, 4);
+    assert.equal(loaded?.snapshot.phase, 'waiting');
+
+    restartedProcess.commit({ leaderId: 'lider-viejo', term: 3, index: 99, snapshot });
+    assert.equal(restartedProcess.index, 21, 'un líder cercado no pisa el término vigente');
+  });
+});
 
 
 // El reloj de Lamport permite saber qué acierto ocurrió antes que otro sin
@@ -92,6 +118,165 @@ describe('Candado del marcador', () => {
 
     assert.equal(await candado.runExclusive('siguiente', () => 42), 42);
     assert.equal(candado.waiting, 0);
+  });
+});
+
+describe('Monitor distribuido', () => {
+  const participant = (overrides: Partial<MonitorParticipant> = {}): MonitorParticipant => ({
+    connectionId: 'node1-connection',
+    role: 'player',
+    nick: 'Ana',
+    playerId: 'player-1',
+    p2pPeerId: 'p_ana12345',
+    nodeId: 'node1',
+    connectedAt: 100,
+    lastSeenAt: 9_800,
+    heartbeatAgeMs: 200,
+    status: 'healthy',
+    ...overrides,
+  });
+
+  test('clasifica el estado a partir de la edad del heartbeat', () => {
+    const monitor = new DistributedMonitoring('node1');
+    assert.equal(monitor.statusForAge(200), 'healthy');
+    assert.equal(monitor.statusForAge(1_500), 'warning');
+    assert.equal(monitor.statusForAge(2_000), 'offline');
+  });
+
+  test('agrega participantes de nodos distintos y cuenta sus roles', () => {
+    const monitor = new DistributedMonitoring('node1');
+    monitor.acceptRemoteReport({
+      nodeId: 'node2',
+      generatedAt: 10_000,
+      participants: [participant({
+        connectionId: 'node2-master',
+        role: 'master',
+        nick: 'Master',
+        playerId: 'master-1',
+        p2pPeerId: 'p_master123',
+        nodeId: 'node2',
+      })],
+    }, 'node2', 10_000);
+
+    const snapshot = monitor.snapshot({
+      localParticipants: [participant()],
+      clusterNodes: [
+        { id: 'node1', up: true, isCoordinator: true, heartbeatAgeMs: 0 },
+        { id: 'node2', up: true, isCoordinator: false, heartbeatAgeMs: 100 },
+      ],
+      coordinatorId: 'node1',
+      electionInProgress: false,
+      nodeTimeoutMs: 2_500,
+      now: 10_000,
+    });
+
+    assert.equal(snapshot.participants.length, 2);
+    assert.deepEqual(
+      snapshot.nodes.map(node => [node.id, node.players, node.masters]),
+      [['node1', 1, 0], ['node2', 0, 1]],
+    );
+  });
+
+  // Eje 4: es el dato con el que el coordinador decide si hace falta promover
+  // a un jugador a anfitrión de la sala.
+  test('cuenta las pantallas maestras vivas de todo el clúster', () => {
+    const monitor = new DistributedMonitoring('node1');
+    monitor.acceptRemoteReport({
+      nodeId: 'node2',
+      generatedAt: 10_000,
+      participants: [participant({ role: 'master', nodeId: 'node2', connectionId: 'node2-master', p2pPeerId: 'p_master123' })],
+    }, 'node2', 10_000);
+
+    assert.equal(monitor.mastersOnline([participant()], 10_000), 1);
+  });
+
+  test('una maestra deja de contar cuando su nodo dejó de reportar', () => {
+    const monitor = new DistributedMonitoring('node1');
+    monitor.acceptRemoteReport({
+      nodeId: 'node2',
+      generatedAt: 10_000,
+      participants: [participant({ role: 'master', nodeId: 'node2', connectionId: 'node2-master', p2pPeerId: 'p_master123' })],
+    }, 'node2', 10_000);
+
+    // El nodo de la maestra se cayó entero: su reporte queda viejo y no puede
+    // seguir sosteniendo que hay alguien al mando.
+    assert.equal(monitor.mastersOnline([participant()], 14_000), 0);
+  });
+
+  test('retiene temporalmente una desconexión para que el master pueda verla', () => {
+    const monitor = new DistributedMonitoring('node1');
+    monitor.rememberDisconnected(participant(), 10_000);
+
+    const report = monitor.localReport([], 10_500);
+    assert.equal(report.participants.length, 1);
+    assert.equal(report.participants[0].status, 'offline');
+    assert.equal(report.participants[0].disconnectedAt, 10_000);
+  });
+});
+
+
+// Eje 4 (capa navegador): si se cierra la pantalla maestra —o cae el nodo
+// donde vivía— la sala no puede quedarse sin nadie con permiso de continuar.
+// El coordinador promueve a un jugador a ANFITRIÓN con el mismo criterio del
+// Matón (gana el id más alto) y la misma regla de estabilidad.
+describe('Anfitrión de la sala', () => {
+  const salaCon = (...ids: string[]) => {
+    const juego = new Game();
+    for (const id of ids) juego.addPlayer(id, `jugador-${id}`, undefined, 'node1');
+    return juego;
+  };
+
+  test('sin jugadores conectados no hay a quién promover', () => {
+    assert.equal(new Game().pickHostCandidate(), null);
+  });
+
+  test('gana el id más alto, igual que el Matón entre nodos', () => {
+    assert.equal(salaCon('node1-a', 'node1-c', 'node1-b').pickHostCandidate(), 'node1-c');
+  });
+
+  test('el anfitrión vigente no es destronado porque entre alguien mayor', () => {
+    const juego = salaCon('node1-a', 'node1-b');
+    juego.setHost(juego.pickHostCandidate(), false);
+    assert.equal(juego.getHostId(), 'node1-b');
+
+    juego.addPlayer('node1-z', 'tardón', undefined, 'node1');
+    assert.equal(juego.pickHostCandidate(), 'node1-b');
+  });
+
+  test('si el anfitrión se va, la sala reelige sola', () => {
+    const juego = salaCon('node1-a', 'node1-b');
+    juego.setHost(juego.pickHostCandidate(), false);
+
+    juego.removePlayer('node1-b');
+    assert.equal(juego.pickHostCandidate(), 'node1-a');
+  });
+
+  test('difunde el cambio una sola vez y se retira cuando vuelve la maestra', () => {
+    const juego = salaCon('node1-a');
+    const difundidos: Array<{ hostId: string | null; masterOnline: boolean }> = [];
+    juego.on('broadcast', (msg: S2C) => {
+      if (msg.type === 'HOST_CHANGED') difundidos.push({ hostId: msg.hostId, masterOnline: msg.masterOnline });
+    });
+
+    assert.equal(juego.setHost('node1-a', false), true);
+    assert.equal(juego.setHost('node1-a', false), false); // ya estaba: no repite
+    assert.equal(juego.setHost(null, true), true);        // volvió la /master
+
+    assert.deepEqual(difundidos, [
+      { hostId: 'node1-a', masterOnline: false },
+      { hostId: null, masterOnline: true },
+    ]);
+  });
+
+  test('el anfitrión sobrevive al cambio de coordinador', () => {
+    const coordinador = salaCon('node1-a', 'node1-b');
+    coordinador.setHost(coordinador.pickHostCandidate(), false);
+
+    // Un seguidor absorbe la réplica y luego gana la elección Bully: tiene que
+    // saber quién puede continuar la partida.
+    const seguidor = new Game();
+    seguidor.restore(coordinador.snapshot());
+    assert.equal(seguidor.getHostId(), 'node1-b');
   });
 });
 

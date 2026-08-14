@@ -366,6 +366,226 @@
     .final-nick { flex: 1; font-weight: 600; }
     .final-score { font-family: var(--font-mono); font-weight: 700; color: var(--secondary); }
 
+    /* ── Eje 4: anfitrión de la sala ──
+       Solo se muestra en el celular que el coordinador promovió cuando ya no
+       queda ninguna pantalla maestra viva en el clúster. */
+    .host-panel {
+      display: none; width: 100%; flex-direction: column; align-items: center; gap: 10px;
+      padding: 14px 16px; border-radius: 14px;
+      background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.34);
+    }
+    .host-panel.show { display: flex; }
+    .host-badge {
+      font: 700 0.72rem/1 var(--font-mono); letter-spacing: 1px;
+      text-transform: uppercase; color: var(--gold);
+    }
+    .host-note { color: var(--text-dim); font-size: 0.85rem; }
+    .host-start {
+      width: 100%; min-height: 48px; padding: 12px 16px;
+      border: 0; border-radius: 12px; cursor: pointer;
+      background: linear-gradient(135deg, var(--primary), #b4308f);
+      color: #fff; font: 800 1rem var(--font-display);
+    }
+    .host-start:disabled { opacity: 0.55; cursor: default; }
+
+    /* ── Monitor distribuido en el celular ──
+       Misma lógica que /master (public/distributed-monitor.js: se enlaza por
+       ids), pero presentado como hoja que sube desde abajo y en una sola
+       columna: aquí el ancho es de un teléfono, no de un proyector. */
+    .monitor-trigger {
+      position: fixed; top: 14px; left: 14px; z-index: 20;
+      display: none; align-items: center; gap: 7px;
+      min-height: 44px; padding: 0 13px; border-radius: 22px;
+      background: var(--surface-glass); backdrop-filter: blur(10px);
+      border: 1px solid rgba(34,211,238,0.3); color: var(--text-dim);
+      font: 700 0.72rem/1 var(--font-mono); cursor: pointer;
+    }
+    .monitor-trigger.ready { display: inline-flex; }
+    .monitor-trigger b { color: var(--tertiary); }
+    .monitor-trigger:active { transform: scale(0.95); }
+    .monitor-live-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--tertiary); box-shadow: 0 0 9px rgba(163,230,53,0.8);
+      animation: monitorPulse 1.8s ease-in-out infinite;
+    }
+    .monitor-trigger.has-alert { border-color: rgba(251,191,36,0.45); }
+    .monitor-trigger.has-alert .monitor-live-dot {
+      background: var(--gold); box-shadow: 0 0 9px rgba(251,191,36,0.8);
+    }
+    @keyframes monitorPulse {
+      0%, 100% { opacity: 0.55; transform: scale(0.85); }
+      50%      { opacity: 1;    transform: scale(1.15); }
+    }
+
+    .monitor-overlay { position: fixed; inset: 0; z-index: 46; visibility: hidden; pointer-events: none; }
+    .monitor-overlay.open { visibility: visible; pointer-events: auto; }
+    .monitor-backdrop {
+      position: absolute; inset: 0; border: 0;
+      background: rgba(7,7,15,0.72); backdrop-filter: blur(6px);
+      opacity: 0; transition: opacity 0.22s ease;
+    }
+    .monitor-overlay.open .monitor-backdrop { opacity: 1; }
+    .monitor-panel {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      height: 92dvh; display: flex; flex-direction: column;
+      background: linear-gradient(180deg, rgba(34,211,238,0.05), transparent 140px), #12121f;
+      border-top: 1px solid rgba(34,211,238,0.24);
+      border-radius: 18px 18px 0 0;
+      transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.2,0.8,0.2,1);
+    }
+    .monitor-overlay.open .monitor-panel { transform: translateY(0); }
+    .monitor-panel-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+      padding: 16px 16px 12px; border-bottom: 1px solid var(--border-soft);
+    }
+    .monitor-kicker {
+      display: flex; align-items: center; gap: 7px; margin-bottom: 5px;
+      color: var(--secondary); font: 700 0.62rem/1 var(--font-mono);
+      letter-spacing: 0.09em; text-transform: uppercase;
+    }
+    .monitor-kicker svg { width: 13px; height: 13px; }
+    .monitor-title { font-size: 1.1rem; }
+    .monitor-intro { margin-top: 5px; color: var(--text-dim); font-size: 0.75rem; line-height: 1.4; }
+    .monitor-close {
+      width: 40px; height: 40px; flex: 0 0 auto;
+      border: 1px solid var(--border-soft); border-radius: 10px;
+      background: var(--surface); color: var(--text);
+      font: 400 1.5rem/1 var(--font-display); cursor: pointer;
+    }
+    .monitor-summary {
+      display: grid; grid-template-columns: repeat(2, minmax(0,1fr));
+      border-bottom: 1px solid var(--border-soft); background: rgba(15,15,26,0.58);
+    }
+    .monitor-stat {
+      padding: 10px 14px; min-width: 0;
+      border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft);
+    }
+    .monitor-stat:nth-child(2n) { border-right: 0; }
+    .monitor-stat:nth-last-child(-n+2) { border-bottom: 0; }
+    .monitor-stat span {
+      display: block; color: var(--text-faint); font-size: 0.6rem;
+      font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    }
+    .monitor-stat b {
+      display: block; margin-top: 4px; color: var(--text);
+      font: 700 1rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .monitor-stat b.ok   { color: var(--tertiary); }
+    .monitor-stat b.warn { color: var(--gold); }
+    /* En un teléfono los filtros y la hora del reporte no caben en la misma
+       línea: se apilan, con los filtros deslizables. */
+    .monitor-toolbar {
+      display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+      padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+    }
+    .monitor-tabs {
+      display: flex; gap: 3px; padding: 3px; min-width: 0; overflow-x: auto;
+      background: #0c0c16; border: 1px solid var(--border-soft); border-radius: 10px;
+      scrollbar-width: none;
+    }
+    .monitor-tabs::-webkit-scrollbar { display: none; }
+    .monitor-tab {
+      border: 0; border-radius: 7px; padding: 8px 10px; background: transparent;
+      color: var(--text-faint); font: 600 0.7rem/1 var(--font-display);
+      cursor: pointer; white-space: nowrap;
+    }
+    .monitor-tab.active { background: var(--surface); color: var(--secondary); }
+    .monitor-updated {
+      color: var(--text-faint); font: 500 0.6rem/1.3 var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .monitor-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch; }
+    .monitor-section + .monitor-section { margin-top: 18px; }
+    .monitor-section-head {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 10px; margin-bottom: 8px;
+    }
+    .monitor-section-title {
+      font-size: 0.68rem; color: var(--text-dim);
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .monitor-section-count { color: var(--text-faint); font: 600 0.65rem/1 var(--font-mono); }
+    .monitor-list { display: grid; gap: 8px; }
+    .monitor-card {
+      overflow: hidden; border: 1px solid var(--border-soft); border-radius: 12px;
+      background: rgba(26,26,46,0.72);
+    }
+    .monitor-card.offline { opacity: 0.7; }
+    /* En el celular las métricas van debajo del nombre, no en columnas. */
+    .monitor-card-main {
+      width: 100%; display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr)) 20px;
+      gap: 10px; align-items: center; padding: 12px;
+      border: 0; background: transparent; color: inherit;
+      text-align: left; font: inherit; cursor: pointer;
+    }
+    /* Fila 1: identidad + chevron. Las tres métricas caen solas a la fila 2. */
+    .monitor-identity {
+      grid-column: 1 / 4; grid-row: 1;
+      min-width: 0; display: flex; align-items: center; gap: 10px;
+    }
+    .monitor-card-chevron {
+      grid-column: 4; grid-row: 1;
+      color: var(--text-faint); transition: transform 0.18s ease;
+    }
+    .monitor-card.expanded .monitor-card-chevron { transform: rotate(90deg); color: var(--secondary); }
+    .monitor-avatar {
+      width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto;
+      display: grid; place-items: center;
+      color: var(--secondary); background: #0e1d27; border: 1px solid rgba(34,211,238,0.25);
+      font: 700 0.8rem/1 var(--font-mono);
+    }
+    .monitor-card.master .monitor-avatar { color: var(--primary); background: #251322; border-color: rgba(240,67,155,0.28); }
+    .monitor-card.node   .monitor-avatar { color: var(--gold);    background: #251d0c; border-color: rgba(251,191,36,0.28); }
+    .monitor-name { min-width: 0; }
+    .monitor-name strong {
+      display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 0.85rem; font-weight: 650;
+    }
+    .monitor-name small {
+      display: flex; align-items: center; gap: 6px; margin-top: 3px;
+      color: var(--text-faint); font: 500 0.64rem/1 var(--font-mono);
+    }
+    .monitor-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+    .monitor-status-dot.healthy { background: var(--tertiary); box-shadow: 0 0 7px rgba(163,230,53,0.7); }
+    .monitor-status-dot.warning { background: var(--gold);     box-shadow: 0 0 7px rgba(251,191,36,0.7); }
+    .monitor-status-dot.offline { background: var(--error); }
+    .monitor-metric { min-width: 0; }
+    .monitor-metric span {
+      display: block; color: var(--text-faint); font-size: 0.57rem;
+      font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .monitor-metric b {
+      display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--text); font: 650 0.73rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums;
+    }
+    .monitor-detail {
+      display: none; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1px;
+      margin: 0 12px 12px; overflow: hidden;
+      border: 1px solid var(--border-soft); border-radius: 9px; background: var(--border-soft);
+    }
+    .monitor-card.expanded .monitor-detail { display: grid; }
+    .monitor-detail-item { min-width: 0; padding: 9px 10px; background: #11111e; }
+    .monitor-detail-item span {
+      display: block; color: var(--text-faint); font-size: 0.55rem;
+      font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .monitor-detail-item code {
+      display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: #cdd8ec; font: 500 0.64rem/1.3 var(--font-mono);
+    }
+    .monitor-empty {
+      padding: 22px 16px; border: 1px dashed var(--border-soft); border-radius: 12px;
+      color: var(--text-faint); text-align: center; font-size: 0.78rem;
+    }
+    .monitor-legend {
+      display: flex; flex-wrap: wrap; gap: 8px 14px;
+      padding: 10px 14px; border-top: 1px solid var(--border-soft);
+      color: var(--text-faint); font: 500 0.6rem/1.3 var(--font-mono);
+    }
+    .monitor-legend span { display: inline-flex; align-items: center; gap: 5px; }
+
     /* ── v2: Perfil ── */
     .profile-fab {
       position: fixed; top: 14px; right: 14px; z-index: 20;
@@ -553,7 +773,8 @@
   <script src="/icons.js"></script>
   <script src="/avatars.js"></script>
   <script src="/sounds.js"></script>
-  <script src="/p2p.js?v=20260813-offline-assets"></script>
+  <script src="/p2p.js?v=20260813-mando"></script>
+  <script src="/distributed-monitor.js?v=20260813-play"></script>
 </head>
 <body>
 
@@ -600,6 +821,12 @@
   <button class="wait-name-action" id="w-change-name" type="button" onclick="openProfileForName()" hidden>Cambiar nombre</button>
   <p class="wait-msg">Esperando que empiece la partida...</p>
   <div class="player-count" id="w-count">0 jugadores</div>
+  <!-- Eje 4: aparece solo si este celular fue promovido a anfitrión -->
+  <div class="host-panel" id="host-panel-wait">
+    <span class="host-badge">Eres el anfitrión</span>
+    <p class="host-note">No hay pantalla maestra conectada. Tú puedes arrancar la partida.</p>
+    <button class="host-start" type="button" onclick="hostStartGame()">Iniciar partida</button>
+  </div>
 </div>
 
 <!-- Pantalla: votación de categoría + dificultad -->
@@ -712,10 +939,71 @@
   <p class="next-msg" id="re-next">Siguiente ronda en breve...</p>
 </div>
 
+<!-- Monitor distribuido en el celular: el mismo panel que proyecta /master,
+     pero como hoja inferior y solo mientras esté abierto (MONITOR_SUBSCRIBE). -->
+<button class="monitor-trigger" id="monitor-trigger" type="button"
+        aria-expanded="false" aria-controls="monitor-overlay"
+        aria-label="Abrir monitor distribuido">
+  <span class="monitor-live-dot" aria-hidden="true"></span>
+  Red <b id="monitor-trigger-count">0/0</b>
+</button>
+
+<div class="monitor-overlay" id="monitor-overlay" aria-hidden="true">
+  <button class="monitor-backdrop" id="monitor-backdrop" type="button"
+          aria-label="Cerrar monitor distribuido"></button>
+  <section class="monitor-panel" role="dialog" aria-modal="true"
+           aria-labelledby="monitor-title" tabindex="-1">
+    <div class="monitor-panel-head">
+      <div>
+        <p class="monitor-kicker"><span data-silunet-icon="network"></span> Observabilidad en vivo</p>
+        <h2 class="monitor-title" id="monitor-title">Monitor distribuido</h2>
+        <p class="monitor-intro">Latidos, latencia, réplica backend y nodo de conexión de cada participante.</p>
+      </div>
+      <button class="monitor-close" id="monitor-close" type="button" aria-label="Cerrar monitor">
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+
+    <div class="monitor-summary">
+      <div class="monitor-stat"><span>Participantes</span><b id="monitor-stat-clients">0/0</b></div>
+      <div class="monitor-stat"><span>Nodos activos</span><b id="monitor-stat-nodes">0/0</b></div>
+      <div class="monitor-stat"><span>RTT promedio</span><b id="monitor-stat-rtt">—</b></div>
+      <div class="monitor-stat"><span>Ruta activa</span><b id="monitor-stat-route">WebSocket</b></div>
+    </div>
+
+    <div class="monitor-toolbar">
+      <div class="monitor-tabs" role="tablist" aria-label="Filtrar monitor">
+        <button class="monitor-tab active" type="button" role="tab" aria-selected="true" data-monitor-filter="all">Todos</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="players">Jugadores</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="masters">Master</button>
+        <button class="monitor-tab" type="button" role="tab" aria-selected="false" data-monitor-filter="nodes">Nodos</button>
+      </div>
+      <span class="monitor-updated" id="monitor-updated">Esperando telemetría…</span>
+    </div>
+
+    <div class="monitor-scroll" id="monitor-content">
+      <div class="monitor-empty">Los reportes aparecerán con el próximo heartbeat.</div>
+    </div>
+
+    <div class="monitor-legend" aria-label="Leyenda de estados">
+      <span><i class="monitor-status-dot healthy"></i> saludable</span>
+      <span><i class="monitor-status-dot warning"></i> latido retrasado</span>
+      <span><i class="monitor-status-dot offline"></i> desconectado</span>
+      <span>Ping 1 s · timeout cliente 2 s · peer 3,5 s</span>
+    </div>
+  </section>
+</div>
+
 <!-- Pantalla: fin de partida -->
 <div id="s-gameEnd" class="screen">
   <div class="podium-title">Partida terminada</div>
   <div class="final-list" id="ge-list"></div>
+  <!-- Eje 4: sin master, la partida no muere aquí — el anfitrión continúa -->
+  <div class="host-panel" id="host-panel-end">
+    <span class="host-badge">Eres el anfitrión</span>
+    <p class="host-note">No hay pantalla maestra conectada. Continúa el juego cuando quieras.</p>
+    <button class="host-start" type="button" onclick="hostStartGame()">Nueva partida</button>
+  </div>
 </div>
 
 <script>
@@ -736,6 +1024,7 @@
   let hintUsed    = false;
   let hintPending = false;
   let notifTimer  = null;
+  let hostId      = null; // Eje 4: jugador con mando cuando no hay pantalla maestra
   let myVote      = null; // categoría que este celular votó (para resaltarla)
   let myDiffVote  = null; // dificultad votada por este celular
   let myAvatar    = window.SilunetAvatars.normalizeAvatarId(localStorage.getItem('silunet_avatar'));
@@ -746,6 +1035,9 @@
 
   // Eje 2: reloj de Lamport del cliente
   let lamport = 0;
+  let stateVersion = 0;
+  let actionSequence = 0;
+  const versionedActions = new Set(['GUESS', 'REQUEST_HINT', 'START_GAME', 'END_GAME', 'STACK_ACTION', 'CAST_VOTE']);
   function lTick()         { return ++lamport; }
   function lUpdate(remote) { lamport = Math.max(lamport, remote ?? 0) + 1; }
 
@@ -772,6 +1064,17 @@
   window.__silunetP2P = p2p;
   p2p.attachSignaling(sendServer);
 
+  // Monitor distribuido en el celular. El mismo módulo que usa /master, pero
+  // suscrito solo mientras el panel está abierto: el snapshot lleva a TODOS los
+  // participantes del clúster y no tiene sentido empujárselo cada segundo a
+  // veinte teléfonos que lo tienen cerrado. Con el panel cerrado el contador
+  // sigue vivo con lo que ve la malla P2P local.
+  const distributedMonitor = window.SilunetDistributedMonitor.create({
+    getP2P: () => p2p,
+    onVisibility: active => sendServer({ type: 'MONITOR_SUBSCRIBE', active }),
+  });
+  window.__silunetMonitor = distributedMonitor;
+
   function buildNodeList() {
     const self = 'ws://' + location.host;
     const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
@@ -785,6 +1088,7 @@
   }
 
   function connectWS() {
+    p2p.setBackendUrl(nodeList[nodeIdx]);
     ws = new WebSocket(nodeList[nodeIdx]);
     window.__silunetSocket = ws;
 
@@ -803,7 +1107,14 @@
       joinRetryTimer = setInterval(sendJoin, 1500);
       clearInterval(pingTimer);
       // Eje 4: heartbeat del celular al servidor cada 1000 ms
-      pingTimer = setInterval(() => send({ type: 'PING', l: lTick() }), 1000);
+      const sendHeartbeat = () => send({
+        type: 'PING',
+        l: lTick(),
+        sentAt: Date.now(),
+        telemetry: p2p.telemetry(),
+      });
+      sendHeartbeat();
+      pingTimer = setInterval(sendHeartbeat, 1000);
     };
 
     ws.onmessage = onSocketMessage;
@@ -827,6 +1138,7 @@
 
   function onSocketMessage(event) {
     const msg = JSON.parse(event.data);
+    if (Number.isSafeInteger(msg.stateVersion)) stateVersion = Math.max(stateVersion, msg.stateVersion);
     if (p2p.handleServerMessage(msg)) return;
     // Eje 2: sincronizar reloj local con cualquier timestamp del servidor
     if (msg.lamport != null) lUpdate(msg.lamport);
@@ -856,21 +1168,60 @@
       case 'PROFILE':         handleProfile(msg);       break;
       case 'AVATAR_UPDATED':  handleAvatarUpdated(msg); break;
       case 'IDENTITY_UPDATED': handleIdentityUpdated(msg); break;
+      case 'HOST_CHANGED':    handleHostChanged(msg);   break;
+      case 'DISTRIBUTED_MONITOR': distributedMonitor.update(msg.snapshot); break;
       case 'PLAYER_LEFT':     showNotif(`${msg.nick} se desconectó`, 'info', 2500); break;
+      case 'STATE_STALE':     showNotif('El tablero cambió; se sincronizó antes de aplicar tu acción.', 'info', 3000); break;
       case 'ERROR':           handleServerError(msg); break;
     }
   }
 
+  // Devuelve si el mensaje SALIÓ de verdad: p2p.js lo usa para no borrar de la
+  // cola una partida offline que en realidad nunca llegó al servidor.
   function sendServer(msg) {
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify(msg));
+    return true;
   }
 
   function send(msg) {
     if ((msg.type === 'GUESS' || msg.type === 'REQUEST_HINT') && p2p.submitAction(msg)) return;
+    if (versionedActions.has(msg.type)) {
+      msg = Object.assign({}, msg, {
+        stateVersion: stateVersion,
+        actionId: `${playerId || 'pending'}-${Date.now()}-${++actionSequence}`,
+        lamport: msg.lamport == null ? lTick() : msg.lamport,
+      });
+    }
     sendServer(msg);
   }
 
+  function forceBackendReconnect() {
+    const abandoned = ws;
+    if (!abandoned || abandoned.readyState > 1) return;
+    clearInterval(pingTimer);
+    clearTimeout(reconnectTimer);
+    abandoned.onclose = null;
+    try { abandoned.close(); } catch (_) {}
+    if (nodeList.length > 1) nodeIdx = (nodeIdx + 1) % nodeList.length;
+    reconnectAttempt = 0;
+    reconnectTimer = setTimeout(connectWS, 100);
+  }
+
+  // Cualquier cambio de la malla puede mover el mando de un celular a otro
+  // (se activó el failover, cambió el líder, volvió el servidor), así que el
+  // panel de anfitrión se reevalúa después de procesar el estado.
   function handleP2PStatus(status) {
+    applyP2PStatus(status);
+    renderHostPanel();
+  }
+
+  function applyP2PStatus(status) {
+    if (status.type === 'no-leader') forceBackendReconnect();
+    if (status.type === 'offline-result') {
+      showNotif('Partida guardada en este celular · se subirá al volver el servidor', 'info', 5000);
+      return;
+    }
     if (status.type === 'assets-ready') {
       showNotif(
         status.count > 0
@@ -886,18 +1237,42 @@
         p2pReadyNotified = false;
       } else if (!p2pReadyNotified) {
         p2pReadyNotified = true;
-        showNotif('Respaldo P2P listo entre jugadores', 'success', 4000);
+        showNotif('Canal de telemetría entre jugadores listo', 'success', 4000);
       }
+      return;
+    }
+    // Eje 4: el clúster volvió. El servidor manda otra vez, así que hay que
+    // pedirle identidad y estado autoritativos — durante el failover sus
+    // mensajes se descartaron para no pelear con el motor P2P, y el WELCOME que
+    // haya mandado en ese rato no llegó a aplicarse.
+    if (status.type === 'server-back') {
+      hideReconnecting();
+      sendJoin();
+      showNotif(status.subidas
+        ? 'Servidor de vuelta · lo jugado sin él quedó guardado'
+        : 'Servidor de vuelta · la partida sigue en el clúster', 'success', 4500);
+      return;
+    }
+    // Eje 4: el servidor se cayó pero la partida NO puede continuar por P2P.
+    // Antes esto era silencioso —la pantalla se quedaba congelada sin decir
+    // nada— y es justo el caso que hay que poder diagnosticar en la feria.
+    const sinContinuidad = {
+      'no-leader':        'Réplica sin respuesta · buscando otro backend',
+      'no-snapshot':      'Servidor fuera · este celular no alcanzó a recibir la partida',
+      'unsupported-mode': 'Servidor fuera · este modo no continúa sin servidor',
+      'not-running':      'Servidor fuera · no había ronda en curso que continuar',
+    }[status.type];
+    if (sinContinuidad) {
+      setBannerText(sinContinuidad);
+      document.getElementById('reconnect-banner').classList.add('show');
       return;
     }
     if (status.type !== 'failover') return;
     currentMode = 'clasico';
-    const banner = document.getElementById('reconnect-banner');
-    const text = banner?.querySelector('span:last-child');
-    if (text) text.textContent = status.isLeader
+    setBannerText(status.isLeader
       ? 'Servidor fuera · este dispositivo coordina la partida P2P'
-      : 'Servidor fuera · la partida continúa entre jugadores por P2P';
-    banner?.classList.add('show');
+      : 'Servidor fuera · la partida continúa entre jugadores por P2P');
+    document.getElementById('reconnect-banner').classList.add('show');
     showNotif(
       status.isLeader
         ? 'Prueba de fuego activa: ahora coordinas la partida.'
@@ -905,6 +1280,11 @@
       'success',
       5000,
     );
+  }
+
+  function setBannerText(texto) {
+    const text = document.getElementById('reconnect-banner').querySelector('span:last-child');
+    if (text) text.textContent = texto;
   }
 
   // El banner solo tiene sentido si ya habíamos llegado a jugar una vez; el
@@ -973,10 +1353,70 @@
     setCount(msg.playerCount);
     // v2: ya hay identidad → habilitar el botón de perfil
     document.getElementById('profile-fab').style.display = 'flex';
+    // …y el acceso al monitor distribuido, que ya tiene a quién mostrar.
+    document.getElementById('monitor-trigger').classList.add('ready');
+    // La suscripción vive en la conexión: si el panel quedó abierto y este
+    // WELCOME viene de una reconexión (u otro nodo), hay que renovarla.
+    if (document.getElementById('monitor-overlay').classList.contains('open')) {
+      sendServer({ type: 'MONITOR_SUBSCRIBE', active: true });
+    }
+    // Eje 4: recién ahora sabemos nuestro playerId; si el HOST_CHANGED llegó
+    // antes que el WELCOME (reconexión por otro nodo), reevaluar el panel.
+    renderHostPanel();
   }
 
   function handlePlayerCount(msg) {
     setCount(msg.count);
+  }
+
+  // ── Eje 4: anfitrión de la sala ───────────────────────────────────────────
+  // El coordinador promueve a un jugador cuando ya no queda ninguna pantalla
+  // maestra viva en el clúster. Ese celular hereda el permiso de arrancar la
+  // partida, así que cerrar el /master (o tumbar su nodo) ya no congela el
+  // juego. Cuando vuelve una pantalla maestra, el rol se retira solo.
+  function handleHostChanged(msg) {
+    const wasHost = isHost();
+    hostId = msg.hostId;
+    renderHostPanel();
+    if (isHost() && !wasHost) {
+      showNotif('Eres el anfitrión: puedes iniciar la partida', 'info', 4500);
+    }
+  }
+
+  function isHost() {
+    return !!myPlayerId && hostId === myPlayerId;
+  }
+
+  // Sin servidor, el mando NO puede venir de HOST_CHANGED: lo hereda el líder
+  // electo de la malla P2P. Es el mismo rol —quien puede arrancar la partida—
+  // sostenido por la única elección que sigue viva cuando el clúster no está.
+  function isOfflineHost() {
+    return p2p.canStartOfflineGame();
+  }
+
+  function renderHostPanel() {
+    const offline = isOfflineHost();
+    const show = offline || isHost();
+    document.querySelectorAll('.host-panel').forEach(panel => panel.classList.toggle('show', show));
+    document.querySelectorAll('.host-note').forEach(nota => {
+      nota.textContent = offline
+        ? 'Servidor caído. Tú tomaste el mando: la partida sigue entre los celulares.'
+        : 'No hay pantalla maestra conectada. Tú puedes arrancar la partida.';
+    });
+  }
+
+  function hostStartGame() {
+    const offline = isOfflineHost();
+    if (!offline && !isHost()) return;
+    // Anti-doble-toque: el servidor ignora un START_GAME con partida en curso,
+    // pero el botón no debe quedar invitando a insistir.
+    document.querySelectorAll('.host-start').forEach(btn => { btn.disabled = true; });
+    if (offline) p2p.startOfflineGame();
+    else send({ type: 'START_GAME' });
+    setTimeout(() => {
+      document.querySelectorAll('.host-start').forEach(btn => { btn.disabled = false; });
+      renderHostPanel();
+    }, 3000);
   }
 
   // ── Votación de temática + dificultad ─────────────────────────────────────
@@ -1415,6 +1855,9 @@
       currentMode = 'clasico';
       renderFinalRanking(msg.entries);
       showScreen('s-gameEnd');
+      // Terminó la partida: si este celular tiene el mando (anfitrión del
+      // servidor o líder de la malla), aquí aparece "Nueva partida".
+      renderHostPanel();
       AudioFX.gameEnd();
       return;
     }
@@ -1849,6 +2292,11 @@
         <span class="rank-score">${e.score}</span>
       </div>`
     ).join('');
+    entries.slice(0, 5).forEach((entry, index) => {
+      if (entry.connected !== false) return;
+      const nick = document.querySelectorAll('#p-ranking .rank-nick')[index];
+      if (nick) nick.textContent += ' · Desconectado';
+    });
   }
 
   function renderFinalRanking(entries) {

@@ -13,7 +13,8 @@ import { LamportClock } from './lamport';
 
 // Eje 4: heartbeats entre nodos. El documento pide detectar la caída en ~2s.
 const HEARTBEAT_INTERVAL_MS = 1000; // latido a cada peer
-const HEARTBEAT_TIMEOUT_MS  = 2500; // sin latido por más de esto → peer caído
+const HEARTBEAT_TIMEOUT_MS  = 2000; // umbral máximo exigido por la rúbrica
+const HEARTBEAT_CHECK_MS    = 50;
 
 // Eje 4 — Algoritmo del Matón (Bully)
 const ELECTION_TIMEOUT_MS = 1500;   // espera de respuestas N_ALIVE antes de proclamarse
@@ -23,6 +24,9 @@ export class Cluster extends EventEmitter {
   readonly nodeId: string;
   coordinatorId:   string;   // puede cambiar con Bully (Eje 4)
   readonly clock:  LamportClock;
+  private term = 1;
+  private readonly clusterSize: number;
+  private quorumAvailableState: boolean;
 
   // Un par de nodos puede abrir simultáneamente una conexión entrante y otra
   // saliente. Se conservan ambas: cerrar una no debe borrar la otra, que puede
@@ -49,6 +53,8 @@ export class Cluster extends EventEmitter {
     this.coordinatorId = coordinatorId;
     this.clock         = clock;
     this.peerUrls      = peerUrls;
+    this.clusterSize   = peerUrls.length + 1;
+    this.quorumAvailableState = this.hasQuorum;
     this.knownNodes.add(nodeId);
 
     // Eje 4: si el peer que cae es el coordinador y yo no lo soy, abro elección Bully.
@@ -62,6 +68,19 @@ export class Cluster extends EventEmitter {
 
   get isCoordinator() { return this.nodeId === this.coordinatorId; }
 
+  get currentTerm() { return this.term; }
+
+  get quorumSize() { return Math.floor(this.clusterSize / 2) + 1; }
+
+  get hasQuorum() { return this.peers.size + 1 >= this.quorumSize; }
+
+  private emitQuorumIfChanged(): void {
+    const available = this.hasQuorum;
+    if (available === this.quorumAvailableState) return;
+    this.quorumAvailableState = available;
+    this.emit('quorum_changed', available);
+  }
+
   getConnectedPeers() { return [...this.peers.keys()]; }
 
   /** Vista de salud del clúster desde este nodo (para la pantalla maestra). */
@@ -72,7 +91,34 @@ export class Cluster extends EventEmitter {
       up: up.has(id),
       isCoordinator: id === this.coordinatorId,
     }));
-    return { nodes, electionInProgress: this.electionInProgress };
+    return {
+      nodes,
+      electionInProgress: this.electionInProgress,
+      term: this.term,
+      quorum: this.quorumSize,
+      quorumAvailable: this.hasQuorum,
+    };
+  }
+
+  /** Estado de heartbeats con edad observable para el monitor distribuido. */
+  monitoringState(now = Date.now()) {
+    const up = new Set([this.nodeId, ...this.peers.keys()]);
+    const nodes = [...this.knownNodes].sort().map(id => ({
+      id,
+      up: up.has(id),
+      isCoordinator: id === this.coordinatorId,
+      heartbeatAgeMs: id === this.nodeId
+        ? 0
+        : this.lastSeen.has(id)
+          ? Math.max(0, now - this.lastSeen.get(id)!)
+          : null,
+    }));
+    return {
+      nodes,
+      electionInProgress: this.electionInProgress,
+      heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+      timeoutMs: HEARTBEAT_TIMEOUT_MS,
+    };
   }
 
   /** Registra un socket y devuelve true únicamente cuando el peer aparece. */
@@ -86,6 +132,7 @@ export class Cluster extends EventEmitter {
     sockets.add(ws);
     this.lastSeen.set(peerId, Date.now());
     this.knownNodes.add(peerId);
+    if (firstConnection) this.emitQuorumIfChanged();
     return firstConnection;
   }
 
@@ -96,6 +143,7 @@ export class Cluster extends EventEmitter {
     if (sockets.size > 0) return false;
     this.peers.delete(peerId);
     this.lastSeen.delete(peerId);
+    this.emitQuorumIfChanged();
     return true;
   }
 
@@ -116,10 +164,14 @@ export class Cluster extends EventEmitter {
       if (!peerId) {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
+        this.observeTerm(msg.term, msg.coordinatorId);
         const firstConnection = this.registerPeer(peerId, ws);
         this.clock.update(msg.lamport);
         // Responder con nuestro propio HELLO
-        this.rawSend(ws, { type: 'N_HELLO', nodeId: this.nodeId, lamport: this.clock.tick() });
+        this.rawSend(ws, {
+          type: 'N_HELLO', nodeId: this.nodeId, term: this.term,
+          coordinatorId: this.coordinatorId, lamport: this.clock.tick(),
+        });
         if (firstConnection) {
           console.log(`[${this.nodeId}] Peer conectado (entrante): ${peerId}`);
           this.emit('peer_connected', peerId);
@@ -157,7 +209,14 @@ export class Cluster extends EventEmitter {
   /** Procesa un frame de un peer ya identificado; intercepta los latidos. */
   private onFrame(peerId: string, msg: N2N) {
     this.lastSeen.set(peerId, Date.now());
+    if ('term' in msg) this.observeTerm(msg.term, msg.type === 'N_HEARTBEAT' ? msg.coordinatorId : undefined);
     if (msg.type === 'N_HEARTBEAT') { this.clock.merge(msg.lamport); return; }
+    if (msg.type === 'N_MONITOR_REPORT') {
+      // La observabilidad no crea un evento causal del juego.
+      this.clock.merge(msg.lamport);
+      this.emit('peer_message', msg, peerId);
+      return;
+    }
     this.clock.update(msg.lamport);
     if (msg.type === 'N_ELECTION' || msg.type === 'N_ALIVE' || msg.type === 'N_COORDINATOR') {
       this.handleElection(msg);
@@ -176,11 +235,29 @@ export class Cluster extends EventEmitter {
     return a > b;
   }
 
-  private handleElection(msg: { type: string; nodeId: string }) {
+  private observeTerm(remoteTerm: number, coordinatorId?: string): void {
+    if (!Number.isSafeInteger(remoteTerm) || remoteTerm < this.term) return;
+    if (remoteTerm > this.term) {
+      this.term = remoteTerm;
+      this.clearElectionTimers();
+      this.electionInProgress = false;
+    }
+    if (coordinatorId && remoteTerm === this.term && coordinatorId !== this.coordinatorId) {
+      this.setCoordinator(coordinatorId, remoteTerm);
+    }
+  }
+
+  restoreTerm(term: number): void {
+    if (Number.isSafeInteger(term) && term > this.term) this.term = term;
+  }
+
+  private handleElection(msg: { type: string; nodeId: string; term: number }) {
     switch (msg.type) {
       case 'N_ELECTION':
         // Un nodo menor me reta: respondo que sigo vivo y arranco mi propia elección.
-        this.sendToPeer(msg.nodeId, { type: 'N_ALIVE', nodeId: this.nodeId, lamport: this.clock.tick() });
+        this.sendToPeer(msg.nodeId, {
+          type: 'N_ALIVE', nodeId: this.nodeId, term: this.term, lamport: this.clock.tick(),
+        });
         this.startElection();
         break;
       case 'N_ALIVE':
@@ -190,15 +267,20 @@ export class Cluster extends EventEmitter {
         this.waitForCoordinator();
         break;
       case 'N_COORDINATOR':
-        this.setCoordinator(msg.nodeId);
+        this.setCoordinator(msg.nodeId, msg.term);
         break;
     }
   }
 
   /** Inicia una elección: reta a los nodos de mayor jerarquía conectados. */
   startElection() {
-    if (this.isCoordinator) { this.announceVictory(); return; }
+    if (this.isCoordinator && this.hasQuorum) { this.announceVictory(); return; }
     if (this.electionInProgress) return;
+    if (!this.hasQuorum) {
+      this.emit('quorum_lost');
+      return;
+    }
+    this.term++;
     this.electionInProgress = true;
     this.gotAlive = false;
     // Panel didáctico de /master: avisa de inmediato que arrancó una elección,
@@ -211,7 +293,9 @@ export class Cluster extends EventEmitter {
     if (higher.length === 0) { this.becomeCoordinator(); return; }
 
     for (const id of higher) {
-      this.sendToPeer(id, { type: 'N_ELECTION', nodeId: this.nodeId, lamport: this.clock.tick() });
+      this.sendToPeer(id, {
+        type: 'N_ELECTION', nodeId: this.nodeId, term: this.term, lamport: this.clock.tick(),
+      });
     }
     if (this.electionTimer) clearTimeout(this.electionTimer);
     this.electionTimer = setTimeout(() => {
@@ -229,6 +313,11 @@ export class Cluster extends EventEmitter {
   }
 
   private becomeCoordinator() {
+    if (!this.hasQuorum) {
+      this.electionInProgress = false;
+      this.emit('quorum_lost');
+      return;
+    }
     if (this.isCoordinator) return;
     console.log(`[${this.nodeId}] [COORDINATOR] Me proclamo COORDINADOR (Bully)`);
     this.coordinatorId = this.nodeId;
@@ -240,10 +329,14 @@ export class Cluster extends EventEmitter {
   }
 
   private announceVictory() {
-    this.broadcastToPeers({ type: 'N_COORDINATOR', nodeId: this.nodeId, lamport: this.clock.tick() });
+    this.broadcastToPeers({
+      type: 'N_COORDINATOR', nodeId: this.nodeId, term: this.term, lamport: this.clock.tick(),
+    });
   }
 
-  private setCoordinator(id: string) {
+  private setCoordinator(id: string, term = this.term) {
+    if (term < this.term) return;
+    this.term = term;
     this.clearElectionTimers();
     this.electionInProgress = false;
     if (this.coordinatorId !== id) {
@@ -262,9 +355,12 @@ export class Cluster extends EventEmitter {
   private startHeartbeats() {
     if (this.hbTimer) return;
     this.hbTimer = setInterval(() => {
-      this.broadcastToPeers({ type: 'N_HEARTBEAT', nodeId: this.nodeId, lamport: this.clock.value });
+      this.broadcastToPeers({
+        type: 'N_HEARTBEAT', nodeId: this.nodeId, term: this.term,
+        coordinatorId: this.coordinatorId, lamport: this.clock.value,
+      });
     }, HEARTBEAT_INTERVAL_MS);
-    setInterval(() => this.checkTimeouts(), HEARTBEAT_INTERVAL_MS);
+    setInterval(() => this.checkTimeouts(), HEARTBEAT_CHECK_MS);
   }
 
   /** Marca como caído a todo peer del que no llega latido dentro del umbral. */
@@ -272,7 +368,7 @@ export class Cluster extends EventEmitter {
     const now = Date.now();
     for (const [peerId, sockets] of [...this.peers]) {
       const last = this.lastSeen.get(peerId) ?? now;
-      if (now - last > HEARTBEAT_TIMEOUT_MS) {
+      if (now - last >= HEARTBEAT_TIMEOUT_MS) {
         console.warn(`[${this.nodeId}] heartbeat perdido de ${peerId} (${now - last}ms) -> caido`);
         this.peers.delete(peerId);
         this.lastSeen.delete(peerId);
@@ -290,7 +386,10 @@ export class Cluster extends EventEmitter {
     let peerId: string | null = null;
 
     ws.on('open', () => {
-      this.rawSend(ws, { type: 'N_HELLO', nodeId: this.nodeId, lamport: this.clock.tick() });
+      this.rawSend(ws, {
+        type: 'N_HELLO', nodeId: this.nodeId, term: this.term,
+        coordinatorId: this.coordinatorId, lamport: this.clock.tick(),
+      });
     });
 
     ws.on('message', (raw) => {
@@ -301,6 +400,7 @@ export class Cluster extends EventEmitter {
       if (!peerId) {
         if (msg.type !== 'N_HELLO') return;
         peerId = msg.nodeId;
+        this.observeTerm(msg.term, msg.coordinatorId);
         const firstConnection = this.registerPeer(peerId, ws);
         this.clock.update(msg.lamport);
         if (firstConnection) {

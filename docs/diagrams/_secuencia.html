@@ -1,44 +1,35 @@
 <!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
+<html lang='es'><head><meta charset='UTF-8'>
 <style>
   body { margin:0; background:#0f0f1a; display:flex; justify-content:center;
          align-items:center; min-height:100vh; padding:36px; box-sizing:border-box; }
   .mermaid { width:100%; }
   .mermaid svg { width:100% !important; height:auto !important; }
 </style></head><body>
-<pre class="mermaid">
+<pre class='mermaid'>
 sequenceDiagram
     autonumber
-    participant H as Laptop host (Node + /master)
-    participant A as Jugador A (navegador)
-    participant B as Jugador B (ID P2P mayor)
+    participant C as Celular
+    participant L as Backend lider
+    participant R2 as Replica 2
+    participant R3 as Replica 3
 
-    H-->>A: P2P_PEERS + P2P_SNAPSHOT
-    H-->>B: P2P_PEERS + P2P_SNAPSHOT
-    A->>H: GET siluetas y revelaciones de la partida
-    B->>H: GET siluetas y revelaciones de la partida
-    H-->>A: recursos → caché local como data URL
-    H-->>B: recursos → caché local como data URL
-    A<<->>B: WebRTC DataChannel abierto
-    A-->>B: HEARTBEAT cada 1 s
-    B-->>A: HEARTBEAT cada 1 s
-    Note over H: Se apaga o pierde la red
-    Note over A,B: WebSocket cerrado o sin actividad del host por más de 3,2 s
-    A-->>B: HEARTBEAT · serverAlive=false
-    B-->>A: HEARTBEAT · serverAlive=false
-    Note over A,B: Tras 1,2 s de gracia y mayoría, ambos calculan el mismo líder
-    A->>A: electedLeader() = B
-    B->>B: electedLeader() = B
-    B-->>A: LEADER B
-    B->>B: startEngine(snapshot replicado)
-
-    A->>B: ACTION · GUESS ROUTER (Lamport)
-    B->>B: valida, ordena y actualiza el marcador
-    B-->>A: GAME · CORRECT_ANSWER / TICK / ROUND_END
-    B-->>A: STATE · snapshot convergente
-    Note over A,B: Clásico sigue sin HTTP: usa recursos cacheados<br/>y cada ronda dura 25, 22, 19… hasta un mínimo de 5 s
+    C->>L: ACTION + Lamport + stateVersion
+    L->>L: mutex FIFO + snapshot + fsync
+    L->>R2: N_REPLICATE term,index,snapshot
+    L->>R3: N_REPLICATE term,index,snapshot
+    R2-->>L: N_REPLICATE_ACK
+    L-->>C: estado confirmado por quorum 2/3
+    Note over L: proceso o red caen
+    R2<<->>R3: heartbeat ausente durante 2000 ms
+    R2<<->>R3: eleccion Bully con termino nuevo
+    R3->>R2: N_STATE_REQUEST
+    R2-->>R3: replica durable
+    R3->>R3: restaura mayor term,index y reanuda timers
+    C->>R3: reconexion WebSocket automatica
+    R3-->>C: siguiente TICK / ROUND_START
 </pre>
-<script type="module">
+<script type='module'>
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
   mermaid.initialize({ startOnLoad:true, theme:'dark',
     themeVariables:{ fontFamily:'system-ui, sans-serif', fontSize:'14px' },

@@ -8,7 +8,24 @@ import { Game }          from './game';
 import { Cluster }       from './cluster';
 import { Store, normalizeAvatarId, PersistenceStore } from './db';
 import { PostgresStore } from './postgres';
-import { S2C, C2S, N2N, GameOverResult, P2PPeerDescriptor } from './types';
+import { DurableReplica, ReplicaStore } from './replicaStore';
+import {
+  BrowserTelemetry,
+  C2S,
+  GameOverResult,
+  GameSnapshot,
+  MonitorParticipant,
+  N2N,
+  P2PPeerDescriptor,
+  S2C,
+  WordEntry,
+} from './types';
+import { getRandomRounds } from './wordBank';
+import {
+  DistributedMonitoring,
+  MONITOR_CLIENT_TIMEOUT_MS,
+  MONITOR_HEARTBEAT_INTERVAL_MS,
+} from './monitoring';
 
 // ── Configuración por instancia ───────────────────────────────────────────────
 const NODE_ID        = process.env.NODE_ID        ?? 'node1';
@@ -17,25 +34,39 @@ const COORDINATOR_ID = process.env.COORDINATOR_ID ?? 'node1';
 const PEER_URLS      = (process.env.PEERS ?? '').split(',').filter(Boolean);
 const PUBLIC_NODE_URLS = (process.env.PUBLIC_NODES ?? '').split(',').map(url => url.trim()).filter(Boolean);
 const MAX_PLAYERS = 5;
+const CLUSTER_ID = process.env.CLUSTER_ID ?? 'silunet-main';
+const REPLICA_DIR = process.env.REPLICA_DIR ?? path.join(__dirname, '..', 'data', 'replicas');
+const REPLICA_COMMIT_TIMEOUT_MS = 1800;
+const REPLICA_SYNC_WINDOW_MS = 700;
 
 // El Game corre en todos los nodos pero solo el coordinador lo controla.
 // El reloj Lamport es compartido entre game y cluster (mismo objeto).
 const game    = new Game();
 const cluster = new Cluster(NODE_ID, COORDINATOR_ID, game.clock, PEER_URLS);
+const monitoring = new DistributedMonitoring(NODE_ID);
+const replicaStore = new ReplicaStore(NODE_ID, CLUSTER_ID, REPLICA_DIR);
+
+// Cada proceso arranca desde disco antes de aceptar conexiones. La memoria es
+// solo una cache de ejecucion: el sucesor puede reconstruirse tras reiniciarse.
+const bootReplica = replicaStore.load();
+if (bootReplica) {
+  cluster.restoreTerm(bootReplica.term);
+  game.restore(bootReplica.snapshot);
+  console.log(`[${NODE_ID}] [REPLICA] Restaurada version ${bootReplica.index} (term ${bootReplica.term}) desde disco`);
+}
 
 // Persistencia de identidad e historia. En despliegue, todos los nodos apuntan
 // a la misma instancia PostgreSQL; SQLite solo conserva el flujo de desarrollo.
 // El coordinador resuelve identidad y escribe. La partida en vivo nunca lee aquí.
 const DATABASE_URL = process.env.DATABASE_URL;
-const ALLOW_SQLITE_CLUSTER = process.env.ALLOW_SQLITE_CLUSTER === '1';
 const store: PersistenceStore = DATABASE_URL
   ? new PostgresStore(DATABASE_URL, NODE_ID)
   : new Store(path.join(__dirname, '..', 'data', `silunet-${NODE_ID}.db`));
 let persistenceInitialized = false;
 let persistenceLeader = false;
 
-if (!DATABASE_URL && PEER_URLS.length > 0 && ALLOW_SQLITE_CLUSTER) {
-  console.warn(`[${NODE_ID}] [WARN] DATABASE_URL ausente: SQLite es solo para desarrollo; el historial NO será consistente entre nodos.`);
+if (!DATABASE_URL && PEER_URLS.length > 0) {
+  console.warn(`[${NODE_ID}] [WARN] Sin PostgreSQL: el juego distribuido continúa; solo el historial queda local a este nodo.`);
 }
 
 const AVATAR_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -121,6 +152,11 @@ const httpServer = http.createServer((req, res) => {
       connectedPeers: cluster.getConnectedPeers(),
       persistenceReady: persistenceInitialized,
       persistenceLeader,
+      clusterTerm: cluster.currentTerm,
+      quorumRequired: cluster.quorumSize,
+      quorumAvailable: cluster.hasQuorum,
+      replicaIndex: replicaStore.index,
+      replicaFile: replicaStore.filePath,
       // Réplica local (Eje 3): permite comparar seguidor vs coordinador
       phase:         game.getPhase(),
       round:         game.getCurrentRoundInfo(),
@@ -163,16 +199,151 @@ const httpServer = http.createServer((req, res) => {
 // ── WebSocket helpers ─────────────────────────────────────────────────────────
 
 interface ClientMeta {
+  connectionId: string;
+  connectedAt: number;
   playerId?: string;
   role: 'player' | 'master' | 'unknown';
   lastSeen?: number; // Eje 4: último heartbeat recibido de este cliente
+  lastPingAt?: number;
+  nick?: string;
+  telemetry?: BrowserTelemetry;
   joinInFlight?: boolean;
+  // El celular tiene el monitor distribuido abierto (ver MONITOR_SUBSCRIBE).
+  monitorSubscribed?: boolean;
   p2pPeerId?: string;
   p2pRole?: 'player' | 'master';
   p2pNick?: string;
+  heartbeatDeadline?: ReturnType<typeof setTimeout>;
 }
 
 const clients = new Map<WebSocket, ClientMeta>();
+const VERSIONED_ACTIONS = new Set<string>([
+  'GUESS', 'REQUEST_HINT', 'START_GAME', 'END_GAME', 'STACK_ACTION', 'CAST_VOTE',
+]);
+
+function validateClientState(ws: WebSocket, msg: C2S): boolean {
+  if (!VERSIONED_ACTIONS.has(msg.type)) return true;
+  if (!cluster.hasQuorum) {
+    send(ws, { type: 'ERROR', message: 'El clúster no tiene mayoría; la jugada no fue aplicada.' });
+    return false;
+  }
+  const received = msg.stateVersion == null ? null : Number(msg.stateVersion);
+  const expected = replicaStore.index;
+  const versionMatches = received == null
+    || (Number.isSafeInteger(received) && received === expected);
+  if (versionMatches && game.acceptAction(msg.actionId)) return true;
+  if (versionMatches) {
+    send(ws, { type: 'ERROR', message: 'La jugada duplicada ya habia sido procesada.' });
+    return false;
+  }
+
+  send(ws, { type: 'STATE_STALE', expectedVersion: expected, receivedVersion: received });
+  const round = game.getCurrentRoundInfo();
+  if (round) send(ws, { type: 'ROUND_START', ...round });
+  send(ws, { type: 'RANKING', entries: game.getRanking(), final: game.getPhase() === 'gameEnd' });
+  const stack = game.stackState();
+  if (stack) send(ws, { type: 'STACK_STATE', state: stack });
+  return false;
+}
+
+function armClientHeartbeat(ws: WebSocket, meta: ClientMeta): void {
+  if (meta.heartbeatDeadline) clearTimeout(meta.heartbeatDeadline);
+  const lastSeen = meta.lastSeen ?? meta.connectedAt;
+  const remaining = Math.max(1, MONITOR_CLIENT_TIMEOUT_MS - (Date.now() - lastSeen));
+  meta.heartbeatDeadline = setTimeout(() => {
+    const age = Date.now() - (meta.lastSeen ?? meta.connectedAt);
+    if (age < MONITOR_CLIENT_TIMEOUT_MS) {
+      armClientHeartbeat(ws, meta);
+      return;
+    }
+    console.log(`[${NODE_ID}] [WARN] Cliente ${meta.playerId ?? meta.connectionId} sin latido (${age}ms) -> baja`);
+    ws.terminate();
+  }, remaining);
+}
+
+function finiteMetric(value: unknown, max: number): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(max, Math.round(numeric))) : 0;
+}
+
+function sanitizeBrowserTelemetry(value: BrowserTelemetry | undefined): BrowserTelemetry | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const leaderId = typeof value.leaderId === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(value.leaderId)
+    ? value.leaderId
+    : null;
+  const serverRttMs = Number.isFinite(Number(value.serverRttMs))
+    ? finiteMetric(value.serverRttMs, 30_000)
+    : undefined;
+  return {
+    serverRttMs,
+    openPeers: finiteMetric(value.openPeers, 20),
+    openPlayerPeers: finiteMetric(value.openPlayerPeers, 20),
+    knownPlayers: finiteMetric(value.knownPlayers, 20),
+    meshReady: value.meshReady === true,
+    failoverActive: value.failoverActive === true,
+    serverAlive: value.serverAlive !== false,
+    leaderId,
+    stateVersion: finiteMetric(value.stateVersion, Number.MAX_SAFE_INTEGER),
+    offlineAssetsReady: value.offlineAssetsReady === true,
+  };
+}
+
+function monitorParticipant(meta: ClientMeta, now = Date.now()): MonitorParticipant | null {
+  if (meta.role === 'unknown') return null;
+  const lastSeenAt = meta.lastPingAt ?? meta.lastSeen ?? meta.connectedAt;
+  const heartbeatAgeMs = Math.max(0, now - lastSeenAt);
+  return {
+    connectionId: meta.connectionId,
+    role: meta.role,
+    nick: meta.nick || meta.p2pNick || (meta.role === 'master' ? 'Master' : 'Jugador'),
+    playerId: meta.playerId,
+    p2pPeerId: meta.p2pPeerId,
+    nodeId: NODE_ID,
+    connectedAt: meta.connectedAt,
+    lastSeenAt,
+    heartbeatAgeMs,
+    status: monitoring.statusForAge(heartbeatAgeMs),
+    telemetry: meta.telemetry,
+  };
+}
+
+function localMonitorParticipants(now = Date.now()): MonitorParticipant[] {
+  const participants: MonitorParticipant[] = [];
+  for (const meta of clients.values()) {
+    const participant = monitorParticipant(meta, now);
+    if (participant) participants.push(participant);
+  }
+  return participants;
+}
+
+// ── Eje 4 (capa navegador): anfitrión de la sala ─────────────────────────────
+//
+// El clúster ya elegía coordinador entre NODOS, pero el permiso para arrancar
+// una partida seguía siendo un rol FIJO del navegador: solo /master. Si esa
+// pantalla se cerraba —o caía el nodo donde vivía— el juego quedaba muerto en
+// 'gameEnd' con los celulares conectados y nadie con permiso de continuar.
+//
+// Ahora el coordinador vigila cuántas pantallas maestras siguen vivas en todo
+// el clúster (dato que ya viaja en los reportes del monitor distribuido). Si no
+// queda ninguna, promueve a un jugador a ANFITRIÓN y difunde el rol; ese celular
+// puede iniciar la siguiente partida. Cuando vuelve una /master, el anfitrión se
+// retira solo. Mismo ciclo que el Matón entre nodos, un piso más arriba.
+function mastersOnlineNow(now = Date.now()): number {
+  return monitoring.mastersOnline(localMonitorParticipants(now), now);
+}
+
+function refreshHost(now = Date.now()): void {
+  if (!cluster.isCoordinator) return;
+  const masterOnline = mastersOnlineNow(now) > 0;
+  game.setHost(masterOnline ? null : game.pickHostCandidate(), masterOnline);
+}
+
+/** ¿Este navegador puede arrancar o cortar una partida? */
+function canControlGame(meta: ClientMeta): boolean {
+  if (meta.role === 'master') return true;
+  const hostId = game.getHostId();
+  return !!hostId && meta.playerId === hostId;
+}
 
 // Id de conexión único por cliente (jugador o master) — incluye NODE_ID para
 // evitar colisiones entre nodos; se usa para enrutar respuestas puntuales
@@ -182,7 +353,11 @@ function genConnId(): string {
 }
 
 function send(ws: WebSocket, msg: S2C) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const enriched = msg.stateVersion == null
+    ? { ...msg, stateVersion: replicaStore.index, lamport: msg.lamport ?? game.clock.value }
+    : msg;
+  ws.send(JSON.stringify(enriched));
 }
 
 function broadcastToLocalClients(msg: S2C) {
@@ -194,11 +369,32 @@ function broadcastToLocalClients(msg: S2C) {
 
 function sendToLocalPlayer(playerId: string, msg: S2C): boolean {
   for (const [ws, meta] of clients) {
-    if (meta.playerId === playerId && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
+    if ((meta.playerId === playerId || meta.connectionId === playerId) && ws.readyState === WebSocket.OPEN) {
+      send(ws, msg);
       return true;
     }
   }
+  return false;
+}
+
+function validateForwardedAction(
+  msg: { originNode: string; actionId?: string; stateVersion?: number },
+  targetId: string,
+): boolean {
+  const received = msg.stateVersion == null ? null : Number(msg.stateVersion);
+  const expected = replicaStore.index;
+  const versionMatches = received == null
+    || (Number.isSafeInteger(received) && received === expected);
+  if (versionMatches && game.acceptAction(msg.actionId)) return true;
+
+  cluster.sendToPeer(msg.originNode, {
+    type: 'N_SEND_TO',
+    playerId: targetId,
+    payload: versionMatches
+      ? { type: 'ERROR', message: 'La jugada duplicada ya habia sido procesada.' }
+      : { type: 'STATE_STALE', expectedVersion: expected, receivedVersion: received ?? -1 },
+    lamport: game.clock.tick(),
+  });
   return false;
 }
 
@@ -230,8 +426,22 @@ function sendP2PRoster(ws: WebSocket, meta: ClientMeta): void {
 }
 
 let p2pSnapshotRevision = 0;
+
+// Munición del motor P2P (Eje 4). Un lote de palabras extra que viaja con cada
+// snapshot para que el líder de la malla pueda arrancar una partida NUEVA si
+// este servidor desaparece: el banco de palabras vive aquí, no en el celular.
+// Se genera UNA vez y se mantiene estable a propósito — si cambiara con cada
+// envío, los celulares no terminarían nunca de precachear sus imágenes.
+const P2P_SPARE_ROUNDS = 8;
+let p2pSpareRounds: WordEntry[] = getRandomRounds(P2P_SPARE_ROUNDS);
+
 function sendP2PSnapshot(ws: WebSocket): void {
-  send(ws, { type: 'P2P_SNAPSHOT', revision: p2pSnapshotRevision, snapshot: game.snapshot() });
+  send(ws, {
+    type: 'P2P_SNAPSHOT',
+    revision: p2pSnapshotRevision,
+    snapshot: game.snapshot(),
+    spare: p2pSpareRounds,
+  });
 }
 
 function broadcastP2PSnapshot(): void {
@@ -240,6 +450,7 @@ function broadcastP2PSnapshot(): void {
     type: 'P2P_SNAPSHOT',
     revision: p2pSnapshotRevision,
     snapshot: game.snapshot(),
+    spare: p2pSpareRounds,
   };
   for (const [ws, meta] of clients) {
     if (meta.p2pPeerId && ws.readyState === WebSocket.OPEN) send(ws, payload);
@@ -256,38 +467,128 @@ function sendClusterState() {
   }
 }
 
+// Eje 4: el anfitrión vigente para un navegador recién llegado. Un seguidor
+// puede responderlo solo: `hostId` viaja replicado dentro del snapshot.
+function sendHostState(ws: WebSocket): void {
+  send(ws, game.hostState(mastersOnlineNow() > 0));
+}
+
+function monitorPayload(now = Date.now()): S2C {
+  const clusterHealth = cluster.monitoringState(now);
+  return {
+    type: 'DISTRIBUTED_MONITOR',
+    snapshot: monitoring.snapshot({
+      localParticipants: localMonitorParticipants(now),
+      clusterNodes: clusterHealth.nodes,
+      coordinatorId: cluster.coordinatorId,
+      electionInProgress: clusterHealth.electionInProgress,
+      nodeTimeoutMs: clusterHealth.timeoutMs,
+      now,
+    }),
+  };
+}
+
+/**
+ * La pantalla maestra recibe el monitor siempre; un celular, solo mientras
+ * tenga el panel ABIERTO (MONITOR_SUBSCRIBE). El snapshot lleva a todos los
+ * participantes del clúster: empujárselo a veinte celulares que no lo están
+ * mirando es gastar el Wi-Fi de la feria en nada. La suscripción —no la
+ * cadencia— es lo que controla ese costo.
+ */
+function sendDistributedMonitor(now = Date.now(), includeSubscribers = false): void {
+  const data = JSON.stringify(monitorPayload(now));
+  for (const [ws, meta] of clients) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (meta.role === 'master' || (includeSubscribers && meta.monitorSubscribed)) ws.send(data);
+  }
+}
+
 // ── Difusión del juego → clientes locales + peers (Eje 1 inter-nodo) ─────────
 
-game.on('broadcast', (msg: S2C) => {
-  broadcastToLocalClients(msg);
-  if (cluster.isCoordinator) {
-    // Coordinador reenvía el broadcast a todos los nodos seguidores
+interface PendingReplicaCommit {
+  acknowledgements: Set<string>;
+  resolve: (index: number) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface ReplicaCandidate {
+  leaderId: string;
+  term: number;
+  index: number;
+  snapshot: GameSnapshot;
+}
+
+interface PendingStateSync { responses: ReplicaCandidate[]; }
+
+const pendingReplicaCommits = new Map<string, PendingReplicaCommit>();
+const pendingStateSync = new Map<string, PendingStateSync>();
+let replicationQueue: Promise<void> = Promise.resolve();
+
+function commitKey(term: number, index: number): string { return `${term}:${index}`; }
+
+/** Persiste localmente y exige ACK durable de una mayoría antes de confirmar. */
+async function commitSnapshot(snapshot: GameSnapshot): Promise<number> {
+  if (!cluster.isCoordinator) throw new Error('El nodo ya no es coordinador');
+  if (!cluster.hasQuorum) throw new Error(`Sin quorum (${cluster.quorumSize} replicas requeridas)`);
+
+  const term = cluster.currentTerm;
+  const index = replicaStore.index + 1;
+  replicaStore.commit({ leaderId: NODE_ID, term, index, snapshot });
+  if (cluster.quorumSize === 1) return index;
+
+  return new Promise<number>((resolve, reject) => {
+    const key = commitKey(term, index);
+    const pending: PendingReplicaCommit = {
+      acknowledgements: new Set([NODE_ID]),
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        pendingReplicaCommits.delete(key);
+        reject(new Error(`Replica ${index} no alcanzo quorum en ${REPLICA_COMMIT_TIMEOUT_MS} ms`));
+      }, REPLICA_COMMIT_TIMEOUT_MS),
+    };
+    pendingReplicaCommits.set(key, pending);
     cluster.broadcastToPeers({
-      type:    'N_BROADCAST',
-      payload: msg,
+      type: 'N_REPLICATE', leaderId: NODE_ID, term, index, snapshot,
       lamport: game.clock.tick(),
     });
-    // Eje 3: replica el estado autoritativo completo para que cada seguidor
-    // mantenga una réplica pasiva (base del failover del Paso C / Bully).
-    cluster.broadcastToPeers({
-      type:     'N_REPLICATE',
-      snapshot: game.snapshot(),
-      lamport:  game.clock.tick(),
-    });
+  });
+}
+
+function queueReplication(snapshot: GameSnapshot, afterCommit?: (index: number) => void): void {
+  const work = async () => {
+    try {
+      const index = await commitSnapshot(snapshot);
+      afterCommit?.(index);
+    } catch (error) {
+      console.error(`[${NODE_ID}] [QUORUM] Estado no confirmado:`, error);
+      game.suspend();
+    }
+  };
+  replicationQueue = replicationQueue.then(work, work);
+}
+
+function broadcastCommitted(msg: S2C, index: number): void {
+  const versioned = { ...msg, stateVersion: index, lamport: game.clock.tick() } as S2C;
+  broadcastToLocalClients(versioned);
+  cluster.broadcastToPeers({
+    type: 'N_BROADCAST', payload: versioned, lamport: game.clock.tick(),
+  });
+}
+
+game.on('broadcast', (msg: S2C) => {
+  if (!cluster.isCoordinator) return;
+  if (msg.type === 'ENGINE_STATE' || msg.type === 'MUTEX_QUEUED') {
+    broadcastCommitted(msg, replicaStore.index);
+    return;
   }
-  broadcastP2PSnapshot();
+  queueReplication(game.snapshot(), index => broadcastCommitted(msg, index));
 });
 
-// Los cambios privados (como usar una pista) no se difunden a todos los
-// celulares, pero sí se replican para sobrevivir a un cambio de coordinador.
+// Cambios privados también quedan persistidos en las réplicas de backend.
 game.on('state_changed', () => {
-  if (!cluster.isCoordinator) return;
-  cluster.broadcastToPeers({
-    type:     'N_REPLICATE',
-    snapshot: game.snapshot(),
-    lamport:  game.clock.tick(),
-  });
-  broadcastP2PSnapshot();
+  if (cluster.isCoordinator) queueReplication(game.snapshot());
 });
 
 function hintPayload(playerId: string): S2C {
@@ -365,6 +666,23 @@ async function persistGameResult(result: GameOverResult): Promise<void> {
 
 game.on('game_over', (result: GameOverResult) => void persistGameResult(result));
 
+// Eje 4 — historial de lo jugado SIN servidor.
+//
+// El líder de la malla P2P sube aquí la partida que se jugó mientras el clúster
+// estaba caído. No es estado vivo (eso lo manda el servidor sin negociar): es un
+// hecho cerrado que solo falta escribir. Se deduplica por gameId porque el
+// celular reintenta hasta que alguien le confirme, y porque cualquier peer de la
+// malla podría subir el mismo resultado.
+const persistedGameIds = new Set<string>();
+
+function acceptOfflineResult(result: GameOverResult): void {
+  if (!result?.gameId || persistedGameIds.has(result.gameId) || pendingGameResults.has(result.gameId)) return;
+  if (!Array.isArray(result.standings) || result.standings.length === 0) return;
+  persistedGameIds.add(result.gameId);
+  console.log(`[${NODE_ID}] [DB] Partida jugada en malla P2P recibida (${result.gameId}), ${result.standings.length} jugadores`);
+  void persistGameResult(result);
+}
+
 setInterval(async () => {
   if (!cluster.isCoordinator || !persistenceLeader || persistenceRetryRunning || pendingGameResults.size === 0) return;
   persistenceRetryRunning = true;
@@ -433,17 +751,68 @@ async function acquirePersistenceLeadership(attempts = LEADER_CLAIM_ATTEMPTS): P
   return false;
 }
 
+async function synchronizeReplicaBeforeLeadership(): Promise<void> {
+  const requestId = `${NODE_ID}-${cluster.currentTerm}-${Date.now()}`;
+  const local = replicaStore.replica;
+  const sync: PendingStateSync = {
+    responses: local ? [{
+      leaderId: local.leaderId,
+      term: local.term,
+      index: local.index,
+      snapshot: local.snapshot,
+    }] : [],
+  };
+  pendingStateSync.set(requestId, sync);
+  cluster.broadcastToPeers({
+    type: 'N_STATE_REQUEST', nodeId: NODE_ID, requestId, lamport: game.clock.tick(),
+  });
+  await delay(REPLICA_SYNC_WINDOW_MS);
+  pendingStateSync.delete(requestId);
+
+  const newest = sync.responses.sort((a, b) => b.term - a.term || b.index - a.index)[0];
+  if (!newest) return;
+  replicaStore.commit({
+    leaderId: NODE_ID,
+    term: cluster.currentTerm,
+    index: Math.max(1, newest.index),
+    snapshot: newest.snapshot,
+  });
+  game.restore(newest.snapshot);
+  console.log(`[${NODE_ID}] [REPLICA] Recuperada version ${newest.index} antes de asumir liderazgo`);
+}
+
+let coordinatorActivationInFlight = false;
+
 async function activateCoordinator(): Promise<void> {
-  console.log(`[${NODE_ID}] [COORDINATOR] Coordinador electo; reanudando desde la réplica`);
-  // La partida en vivo depende de la elección entre nodos, no de la base
-  // histórica. Primero vuelve el reloj; PostgreSQL se recupera en paralelo.
+  if (coordinatorActivationInFlight) return;
+  coordinatorActivationInFlight = true;
+  try {
+  console.log(`[${NODE_ID}] [COORDINATOR] Coordinador electo; recuperando réplica durable`);
+  game.suspend();
+  if (!cluster.hasQuorum) {
+    console.warn(`[${NODE_ID}] Sin quorum: el nodo no ejecutará jugadas ni timers`);
+    return;
+  }
+  await synchronizeReplicaBeforeLeadership();
+  if (!cluster.isCoordinator || !cluster.hasQuorum) {
+    console.log(`[${NODE_ID}] Activación cancelada: cambió el término o se perdió quorum`);
+    return;
+  }
+  // Sella el estado recuperado con el término nuevo antes de reanudar timers.
+  await commitSnapshot(game.snapshot());
   game.pruneToLivingNodes([NODE_ID, ...cluster.getConnectedPeers()]);
   game.resume();
-  console.log(`[${NODE_ID}] [OK] Partida reanudada; recuperando persistencia en segundo plano`);
+  console.log(`[${NODE_ID}] [OK] Partida reanudada desde disco con quorum`);
 
   const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());
   if (!acquired) {
     console.warn(`[${NODE_ID}] Sin concesión de escritura; la partida continúa y el resultado queda pendiente`);
+  }
+  } catch (error) {
+    console.warn(`[${NODE_ID}] Activación de coordinador cancelada:`, error);
+    game.suspend();
+  } finally {
+    coordinatorActivationInFlight = false;
   }
 }
 
@@ -475,9 +844,67 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       broadcastToLocalClients(msg.payload);
       break;
 
-    // Seguidor recibe el estado autoritativo → actualizar su réplica pasiva (Eje 3)
-    case 'N_REPLICATE':
+    // El seguidor fuerza el snapshot a SU disco antes de responder. El líder
+    // no lo mostrará a los celulares hasta reunir una mayoría de estos ACK.
+    case 'N_REPLICATE': {
+      if (msg.term !== cluster.currentTerm || msg.leaderId !== cluster.coordinatorId) return;
+      replicaStore.commit({
+        leaderId: msg.leaderId,
+        term: msg.term,
+        index: msg.index,
+        snapshot: msg.snapshot,
+      });
       if (!cluster.isCoordinator) game.restore(msg.snapshot);
+      cluster.sendToPeer(fromPeerId, {
+        type: 'N_REPLICATE_ACK', nodeId: NODE_ID, term: msg.term,
+        index: msg.index, lamport: game.clock.tick(),
+      });
+      break;
+    }
+
+    case 'N_REPLICATE_ACK': {
+      if (!cluster.isCoordinator || msg.term !== cluster.currentTerm) return;
+      const key = commitKey(msg.term, msg.index);
+      const pending = pendingReplicaCommits.get(key);
+      if (!pending) return;
+      pending.acknowledgements.add(msg.nodeId);
+      if (pending.acknowledgements.size >= cluster.quorumSize) {
+        clearTimeout(pending.timer);
+        pendingReplicaCommits.delete(key);
+        pending.resolve(msg.index);
+      }
+      break;
+    }
+
+    case 'N_STATE_REQUEST': {
+      const replica = replicaStore.replica;
+      cluster.sendToPeer(fromPeerId, {
+        type: 'N_STATE_RESPONSE', nodeId: NODE_ID, requestId: msg.requestId,
+        leaderId: replica?.leaderId ?? '', term: replica?.term ?? 0,
+        index: replica?.index ?? 0, snapshot: replica?.snapshot ?? null,
+        lamport: game.clock.tick(),
+      });
+      break;
+    }
+
+    case 'N_STATE_RESPONSE': {
+      const sync = pendingStateSync.get(msg.requestId);
+      if (sync && msg.snapshot) {
+        sync.responses.push({
+          leaderId: msg.leaderId,
+          term: msg.term,
+          index: msg.index,
+          snapshot: msg.snapshot,
+        });
+      }
+      break;
+    }
+
+    // Cada nodo comparte la salud de sus navegadores locales. Cualquier nodo
+    // puede agregarla y mostrársela a un master conectado a él.
+    case 'N_MONITOR_REPORT':
+      monitoring.acceptRemoteReport(msg.report, fromPeerId);
+      sendDistributedMonitor();
       break;
 
     // Coordinador → seguidor: enviar a un jugador específico en ese nodo
@@ -529,6 +956,7 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía GUESS al coordinador (Eje 2: Lamport del cliente incluido)
     case 'N_FORWARD_GUESS': {
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.playerId)) return;
       const result = await game.handleGuess(msg.playerId, msg.word, msg.lamport);
       // Solo respuestas negativas van de vuelta al jugador; las positivas se broadcast
       if (result === 'wrong' || result === 'already_solved') {
@@ -544,6 +972,7 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
 
     case 'N_FORWARD_HINT': {
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.playerId)) return;
       cluster.sendToPeer(msg.originNode, {
         type:     'N_SEND_TO',
         playerId: msg.playerId,
@@ -556,24 +985,28 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
     // Seguidor reenvía START_GAME del master
     case 'N_FORWARD_START':
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.requesterId)) return;
       game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
       break;
 
     // Seguidor reenvía el END_GAME del master
     case 'N_FORWARD_END_GAME':
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.requesterId)) return;
       game.clock.update(msg.lamport);
       game.endGameNow();
       break;
 
     case 'N_FORWARD_STACK_ACTION':
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.playerId)) return;
       game.clock.update(msg.lamport);
       game.stackAction(msg.playerId, msg.action);
       break;
     // Seguidor reenvía el voto (categoría o dificultad) de su jugador al coordinador
     case 'N_FORWARD_VOTE':
       if (!cluster.isCoordinator) return;
+      if (!validateForwardedAction(msg, msg.playerId)) return;
       game.castVote(msg.playerId, msg.kind, msg.option);
       break;
 
@@ -661,6 +1094,12 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
       break;
     }
 
+    // Un seguidor recibió del líder P2P una partida jugada sin servidor
+    case 'N_FORWARD_OFFLINE_RESULT':
+      if (!cluster.isCoordinator) return;
+      acceptOfflineResult(msg.result);
+      break;
+
     // Seguidor notifica que un jugador se desconectó
     case 'N_PLAYER_LEFT':
       if (!cluster.isCoordinator) return;
@@ -675,6 +1114,22 @@ cluster.on('peer_message', async (msg: N2N, fromPeerId: string) => {
 cluster.on('peer_connected',    (id: string) => console.log(`[${NODE_ID}] [OK] Peer listo: ${id}`));
 cluster.on('peer_disconnected', (id: string) => console.log(`[${NODE_ID}] [DOWN] Peer caído: ${id}`));
 cluster.on('peer_timeout',      (id: string) => console.log(`[${NODE_ID}] [WARN] Heartbeat perdido de ${id} (Eje 4)`));
+
+cluster.on('quorum_changed', (available: boolean) => {
+  console.log(`[${NODE_ID}] [QUORUM] ${available ? 'disponible' : 'perdido'} (${cluster.quorumSize} requeridos)`);
+  if (!available) {
+    game.suspend();
+    for (const [key, pending] of pendingReplicaCommits) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Quorum perdido durante el commit'));
+      pendingReplicaCommits.delete(key);
+    }
+  } else if (cluster.isCoordinator) {
+    void activateCoordinator();
+  }
+  sendClusterState();
+});
+cluster.on('quorum_lost', () => game.suspend());
 
 // Eje 4: cuando el coordinador (el que sea, ahora o tras un failover) pierde un
 // nodo, cualquier jugador cuyo WebSocket vivía ahí queda "fantasma" (ver
@@ -708,6 +1163,28 @@ setInterval(() => {
   if (cluster.isCoordinator) game.broadcastEngineState();
 }, ENGINE_STATE_INTERVAL_MS);
 
+// Observabilidad distribuida: cada nodo publica sus clientes locales y arma
+// una vista global para cualquier /master, aunque esté conectado a un seguidor.
+// Un celular con el panel abierto recibe la misma vista, al mismo ritmo.
+setInterval(() => {
+  const now = Date.now();
+  // Eje 4: barrido periódico del anfitrión. Cubre lo que ningún evento local
+  // avisa —el master vivía en un nodo que se cayó entero, o este nodo acaba de
+  // ganar la elección Bully y hereda una sala sin mando.
+  refreshHost(now);
+  const report = monitoring.localReport(localMonitorParticipants(now), now);
+  cluster.broadcastToPeers({
+    type: 'N_MONITOR_REPORT',
+    report,
+    lamport: game.clock.value,
+  });
+  // Este es el único punto que alimenta a los celulares suscritos: los envíos
+  // por reporte de peer van solo al master. Va al mismo pulso que el heartbeat
+  // (1 s) porque a menos ritmo el snapshot envejece y el propio latido del
+  // celular se pinta como "retrasado" siendo mentira.
+  sendDistributedMonitor(now, true);
+}, MONITOR_HEARTBEAT_INTERVAL_MS);
+
 // ── Conexiones WebSocket de clientes ─────────────────────────────────────────
 
 const wss = new WebSocketServer({ server: httpServer, maxPayload: 512 * 1024 });
@@ -719,7 +1196,15 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     return;
   }
 
-  clients.set(ws, { role: 'unknown', lastSeen: Date.now() });
+  const connectedAt = Date.now();
+  const initialMeta: ClientMeta = {
+    connectionId: genConnId(),
+    connectedAt,
+    role: 'unknown',
+    lastSeen: connectedAt,
+  };
+  clients.set(ws, initialMeta);
+  armClientHeartbeat(ws, initialMeta);
 
   ws.on('message', async (raw) => {
     let msg: C2S;
@@ -728,15 +1213,23 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
     const client = clients.get(ws)!;
     client.lastSeen = Date.now(); // Eje 4: cualquier mensaje (incl. PING) cuenta como latido
+    armClientHeartbeat(ws, client);
 
     try {
+    if (!validateClientState(ws, msg)) return;
     switch (msg.type) {
 
       case 'PING': {
         // Un corte fisico de Wi-Fi puede dejar el WebSocket del navegador en
         // OPEN durante minutos. El PONG permite que el cliente detecte ese
-        // socket fantasma con un timeout corto y active el failover P2P.
-        send(ws, { type: 'PONG', ts: Date.now() });
+        // socket fantasma con un timeout corto y rote hacia otra replica.
+        client.lastPingAt = Date.now();
+        client.telemetry = sanitizeBrowserTelemetry(msg.telemetry);
+        send(ws, {
+          type: 'PONG',
+          ts: Date.now(),
+          clientTs: Number.isFinite(Number(msg.sentAt)) ? Number(msg.sentAt) : undefined,
+        });
         // Tambien repara carreras de senalizacion: si un DataChannel inicial
         // fallo, el siguiente roster permite reconstruirlo sin recargar.
         sendP2PRoster(ws, client);
@@ -749,12 +1242,13 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         try {
         const nick = (msg.nick ?? '').trim().slice(0, 20);
         if (!nick) { send(ws, { type: 'ERROR', message: 'Nick inválido' }); return; }
+        client.nick = nick;
 
         const token    = msg.token ?? null; // v2: identidad persistente del celular
         const existingSession = client.playerId ? game.getPlayer(client.playerId) : undefined;
         const reconnecting = !!(token && game.wasConnected(token));
         if (!existingSession && !reconnecting && game.getPlayerCount() >= MAX_PLAYERS) {
-          send(ws, { type: 'ERROR', message: `Sala llena: máximo ${MAX_PLAYERS} jugadores para garantizar el failover P2P.` });
+          send(ws, { type: 'ERROR', message: `Sala llena: máximo ${MAX_PLAYERS} jugadores para mantener una partida estable.` });
           return;
         }
         const playerId = client.playerId ?? genConnId();
@@ -768,6 +1262,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
           if (roundInfo) send(ws, { type: 'ROUND_START', ...roundInfo });
           const stack = game.stackState();
           if (stack) send(ws, { type: 'STACK_STATE', state: stack });
+          // Eje 4: entró un candidato a anfitrión. Si la sala estaba sin
+          // pantalla maestra y sin nadie al mando, este celular puede serlo.
+          refreshHost();
         } else {
           // Seguidor: reenviar al coordinador (incluido el token); la respuesta llega como N_SEND_TO
           cluster.sendToCoordinator({
@@ -783,6 +1280,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         } finally {
           client.joinInFlight = false;
         }
+        // Eje 4: quién manda ahora mismo en la sala. Va después del WELCOME
+        // para que el celular ya conozca su propio playerId al recibirlo.
+        sendHostState(ws);
         break;
       }
 
@@ -790,6 +1290,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         if (!client.playerId || client.role !== 'player' || !msg.token) return;
         const nick = msg.nick.trim().slice(0, 20);
         if (!nick) { send(ws, { type: 'ERROR', message: 'Escribe un nombre válido.' }); break; }
+        client.nick = nick;
+        client.p2pNick = nick;
         if (cluster.isCoordinator) {
           const player = game.getPlayer(client.playerId);
           if (!player || player.token !== msg.token) {
@@ -863,8 +1365,14 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
       case 'MASTER_JOIN': {
         client.role     = 'master';
+        client.nick     = 'Master';
         client.playerId = genConnId(); // v2.1: para poder enrutarle el HALL_OF_FAME si es seguidor
         sendClusterState(); // Eje 4: salud del clúster al instante
+        sendDistributedMonitor();
+        // Eje 4: volvió una pantalla maestra -> el anfitrión de emergencia se
+        // retira (refreshHost lo pone en null y lo difunde).
+        refreshHost();
+        sendHostState(ws);
         if (cluster.isCoordinator) {
           send(ws, { type: 'PLAYER_COUNT', count: game.getPlayerCount() });
           if (game.getPhase() !== 'waiting') {
@@ -897,6 +1405,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         client.p2pPeerId = msg.peerId;
         client.p2pRole = msg.role;
         client.p2pNick = msg.nick?.trim().slice(0, 20);
+        if (client.p2pNick) client.nick = client.p2pNick;
         broadcastP2PRoster();
         sendP2PSnapshot(ws);
         break;
@@ -924,6 +1433,8 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             playerId:   client.playerId,
             word:       msg.word ?? '',
             originNode: NODE_ID,
+            actionId:   msg.actionId,
+            stateVersion: msg.stateVersion,
             lamport:    msg.lamport ?? game.clock.tick(),
           });
         }
@@ -940,7 +1451,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
               playerId: client.playerId,
               action: msg.action,
               originNode: NODE_ID,
-              lamport: game.clock.tick(),
+              actionId: msg.actionId,
+              stateVersion: msg.stateVersion,
+              lamport: msg.lamport ?? game.clock.tick(),
             });
           }
         }
@@ -959,14 +1472,18 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             type:       'N_FORWARD_HINT',
             playerId:   client.playerId,
             originNode: NODE_ID,
-            lamport:    game.clock.tick(),
+            actionId:   msg.actionId,
+            stateVersion: msg.stateVersion,
+            lamport:    msg.lamport ?? game.clock.tick(),
           });
         }
         break;
       }
 
       case 'START_GAME': {
-        if (client.role !== 'master') return;
+        // Eje 4: la pantalla maestra siempre; un jugador, solo mientras sea el
+        // anfitrión electo (es decir, cuando no queda ninguna /master viva).
+        if (!canControlGame(client)) return;
         if (cluster.isCoordinator) {
           game.startGame(msg.totalRounds ?? 8, msg.mode ?? 'clasico');
         } else {
@@ -974,7 +1491,11 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             type:       'N_FORWARD_START',
             totalRounds: msg.totalRounds ?? 8,
             mode:       msg.mode ?? 'clasico',
-            lamport:    game.clock.tick(),
+            requesterId: client.connectionId,
+            originNode: NODE_ID,
+            actionId:   msg.actionId,
+            stateVersion: msg.stateVersion,
+            lamport:    msg.lamport ?? game.clock.tick(),
           });
         }
         break;
@@ -983,13 +1504,17 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       // El master corta la partida antes de tiempo. Mismo camino que START_GAME:
       // si este nodo no es el coordinador, se reenvía y decide allá.
       case 'END_GAME': {
-        if (client.role !== 'master') return;
+        if (!canControlGame(client)) return;
         if (cluster.isCoordinator) {
           game.endGameNow();
         } else {
           cluster.sendToCoordinator({
             type:    'N_FORWARD_END_GAME',
-            lamport: game.clock.tick(),
+            requesterId: client.connectionId,
+            originNode: NODE_ID,
+            actionId: msg.actionId,
+            stateVersion: msg.stateVersion,
+            lamport: msg.lamport ?? game.clock.tick(),
           });
         }
         break;
@@ -1010,7 +1535,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
             kind,
             option:     msg.option ?? '',
             originNode: NODE_ID,
-            lamport:    game.clock.tick(),
+            actionId:   msg.actionId,
+            stateVersion: msg.stateVersion,
+            lamport:    msg.lamport ?? game.clock.tick(),
           });
         }
         break;
@@ -1039,6 +1566,31 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       // v2.1: la pantalla maestra pide el salón de la fama (histórico de TODAS
       // las Casa Abierta jugadas). Misma mecánica que GET_PROFILE: lectura
       // puntual, solo la DB del coordinador es la fuente de verdad.
+      // El celular abrió o cerró el monitor distribuido. Al abrirlo se le
+      // responde al instante para que no vea el panel vacío hasta el próximo
+      // pulso; al cerrarlo deja de recibir snapshots.
+      // Solo el coordinador escribe la historia; un seguidor reenvía.
+      case 'OFFLINE_RESULT': {
+        if (client.role !== 'player') return;
+        if (cluster.isCoordinator) {
+          acceptOfflineResult(msg.result);
+        } else {
+          cluster.sendToCoordinator({
+            type:    'N_FORWARD_OFFLINE_RESULT',
+            result:  msg.result,
+            lamport: game.clock.tick(),
+          });
+        }
+        break;
+      }
+
+      case 'MONITOR_SUBSCRIBE': {
+        if (client.role === 'unknown') return;
+        client.monitorSubscribed = msg.active === true;
+        if (client.monitorSubscribed) send(ws, monitorPayload());
+        break;
+      }
+
       case 'GET_HALL_OF_FAME': {
         if (cluster.isCoordinator) {
           const [top, recentGames] = await Promise.all([
@@ -1065,6 +1617,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
   ws.on('close', () => {
     const client = clients.get(ws);
+    if (client?.heartbeatDeadline) clearTimeout(client.heartbeatDeadline);
+    const disconnected = client ? monitorParticipant(client) : null;
+    if (disconnected) monitoring.rememberDisconnected(disconnected);
     // role==='player': masters también tienen playerId (v2.1, para enrutar
     // HALL_OF_FAME) pero nunca se registraron en game.players -> nada que soltar.
     if (client?.role === 'player' && client.playerId) {
@@ -1081,29 +1636,16 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const hadP2PIdentity = !!client?.p2pPeerId;
     clients.delete(ws);
     if (hadP2PIdentity) broadcastP2PRoster();
+    // Eje 4: se fue el anfitrión, o se fue la última pantalla maestra. En
+    // ambos casos hay que reelegir para que la sala no quede sin mando.
+    // (Si la baja fue de un master remoto, el barrido periódico lo cubre.)
+    refreshHost();
   });
 });
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
 
-// Eje 4 (clientes): cada celular late cada 1s; si un cliente-jugador deja de
-// latir por más de 2s (pantalla apagada / Wi-Fi caído sin cerrar el socket),
-// se le da de baja del pool, igual que un cierre de conexión.
-const CLIENT_TIMEOUT_MS = 2000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [ws, meta] of clients) {
-    if (meta.role === 'player' && meta.lastSeen && now - meta.lastSeen > CLIENT_TIMEOUT_MS) {
-      console.log(`[${NODE_ID}] [WARN] Cliente ${meta.playerId} sin latido (${now - meta.lastSeen}ms) -> baja`);
-      ws.terminate(); // dispara 'close' -> removePlayer / N_PLAYER_LEFT + PLAYER_LEFT
-    }
-  }
-}, 500);
-
 async function bootstrap(): Promise<void> {
-  if (!DATABASE_URL && PEER_URLS.length > 0 && !ALLOW_SQLITE_CLUSTER) {
-    throw new Error('Un clúster requiere DATABASE_URL compartida. ALLOW_SQLITE_CLUSTER=1 se reserva para V&V local.');
-  }
   const initialized = await ensurePersistenceInitialized();
   if (cluster.isCoordinator && initialized) {
     const acquired = await withExclusiveLeadershipOperation(() => acquirePersistenceLeadership());

@@ -4,10 +4,10 @@ services:
     environment:
       POSTGRES_DB: silunet
       POSTGRES_USER: silunet
-      POSTGRES_PASSWORD: silunet_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silunet_dev}
     ports:
       # Solo desarrollo en una laptop; no expone la contraseña de ejemplo a la LAN.
-      - "127.0.0.1:5432:5432"
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U silunet -d silunet"]
       interval: 5s

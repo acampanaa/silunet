@@ -1,0 +1,31 @@
+name: ${COMPOSE_PROJECT_NAME:-silunet-node}
+
+services:
+  node:
+    build:
+      context: .
+    image: silunet:local
+    restart: unless-stopped
+    environment:
+      NODE_ID: ${NODE_ID:?Define NODE_ID en .env.node}
+      PORT: "3001"
+      COORDINATOR_ID: ${COORDINATOR_ID:-node1}
+      PEERS: ${PEERS:?Define PEERS en .env.node}
+      PUBLIC_NODES: ${PUBLIC_NODES:?Define PUBLIC_NODES en .env.node}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      CLUSTER_ID: ${CLUSTER_ID:-silunet-main}
+      REPLICA_DIR: /app/data/replicas
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${HOST_PORT:-3001}:3001"
+    volumes:
+      - silunet_node_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3001/api/info"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  silunet_node_data:

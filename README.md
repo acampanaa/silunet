@@ -380,6 +380,15 @@ eligió para un proyecto de este tamaño y duración.
 ---
 
 ## 6. Guía detallada de despliegue
+> **Ruta Docker recomendada:** [`docs/DESPLIEGUE-DOCKER.md`](docs/DESPLIEGUE-DOCKER.md)
+> permite levantar el cluster completo con gateway y PostgreSQL usando:
+>
+> ```powershell
+> .\scripts\docker-cluster.ps1 up
+> ```
+>
+> La misma guia explica el despliegue de un nodo Docker en cada laptop y el tunel publico opcional.
+
 
 ### 6.1. Requisitos previos
 

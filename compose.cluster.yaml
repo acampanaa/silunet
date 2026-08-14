@@ -1,0 +1,116 @@
+name: silunet
+
+x-node-environment: &node-environment
+  PORT: "3001"
+  COORDINATOR_ID: node1
+  CLUSTER_ID: silunet-main
+  DATABASE_URL: postgresql://silunet:${POSTGRES_PASSWORD:-silunet_dev}@postgres:5432/silunet
+  DB_POOL_SIZE: "5"
+  REPLICA_DIR: /app/data/replicas
+  PUBLIC_NODES: origin
+
+x-node-common: &node-common
+  build:
+    context: .
+  image: silunet:local
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3001/api/info"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
+  networks: [silunet]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: silunet
+      POSTGRES_USER: silunet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silunet_dev}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U silunet -d silunet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - silunet_postgres_data:/var/lib/postgresql/data
+    networks: [silunet]
+
+  node1:
+    <<: *node-common
+    environment:
+      <<: *node-environment
+      NODE_ID: node1
+      PEERS: ws://node2:3001,ws://node3:3001
+    ports:
+      - "${SILUNET_BIND_IP:-0.0.0.0}:3001:3001"
+    volumes:
+      - silunet_node1_data:/app/data
+
+  node2:
+    <<: *node-common
+    environment:
+      <<: *node-environment
+      NODE_ID: node2
+      PEERS: ws://node1:3001,ws://node3:3001
+    ports:
+      - "${SILUNET_BIND_IP:-0.0.0.0}:3002:3001"
+    volumes:
+      - silunet_node2_data:/app/data
+
+  node3:
+    <<: *node-common
+    environment:
+      <<: *node-environment
+      NODE_ID: node3
+      PEERS: ws://node1:3001,ws://node2:3001
+    ports:
+      - "${SILUNET_BIND_IP:-0.0.0.0}:3003:3001"
+    volumes:
+      - silunet_node3_data:/app/data
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+    ports:
+      - "${SILUNET_BIND_IP:-0.0.0.0}:${SILUNET_GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8080/api/info"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [silunet]
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://gateway:8080"]
+    networks: [silunet]
+
+networks:
+  silunet:
+
+volumes:
+  silunet_postgres_data:
+  silunet_node1_data:
+  silunet_node2_data:
+  silunet_node3_data:

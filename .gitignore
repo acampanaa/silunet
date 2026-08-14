@@ -5,6 +5,7 @@ data/
 *.db
 *.db-journal
 *.db-wal
+.env.node
 
 # Resultados regenerables de pruebas y cobertura.
 reports/

@@ -1076,7 +1076,7 @@
   window.__silunetMonitor = distributedMonitor;
 
   function buildNodeList() {
-    const self = 'ws://' + location.host;
+    const self = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
     const httpToWs = u => u.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     const others = (window.SILUNET_NODES || []).map(httpToWs).filter(u => u !== self);
     return [...new Set([self, ...others])];

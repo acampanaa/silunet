@@ -31,8 +31,12 @@ import {
 const NODE_ID        = process.env.NODE_ID        ?? 'node1';
 const PORT           = parseInt(process.env.PORT  ?? '3001', 10);
 const COORDINATOR_ID = process.env.COORDINATOR_ID ?? 'node1';
-const PEER_URLS      = (process.env.PEERS ?? '').split(',').filter(Boolean);
-const PUBLIC_NODE_URLS = (process.env.PUBLIC_NODES ?? '').split(',').map(url => url.trim()).filter(Boolean);
+const PEER_URLS      = (process.env.PEERS ?? '').split(',').map(url => url.trim()).filter(Boolean);
+const PUBLIC_NODES_SETTING = (process.env.PUBLIC_NODES ?? '').trim();
+const SAME_ORIGIN_GATEWAY = PUBLIC_NODES_SETTING.toLowerCase() === 'origin';
+const PUBLIC_NODE_URLS = SAME_ORIGIN_GATEWAY
+  ? []
+  : PUBLIC_NODES_SETTING.split(',').map(url => url.trim()).filter(Boolean);
 const MAX_PLAYERS = 5;
 const CLUSTER_ID = process.env.CLUSTER_ID ?? 'silunet-main';
 const REPLICA_DIR = process.env.REPLICA_DIR ?? path.join(__dirname, '..', 'data', 'replicas');
@@ -107,13 +111,35 @@ function getLocalIP(): string {
 // perdió la elección Bully) pueda reconectarse solo por cualquier otro nodo vivo,
 // sin perder su sesión ni su puntaje de la partida en curso.
 function siblingNodeUrls(): string[] {
+  // Detras del gateway Docker el navegador solo necesita su origen actual. Si
+  // el backend asignado cae, Nginx acepta la reconexion y selecciona otro.
+  if (SAME_ORIGIN_GATEWAY) return [];
   const self = `http://${getLocalIP()}:${PORT}`;
-  const configured = PUBLIC_NODE_URLS.length > 0 ? PUBLIC_NODE_URLS : PEER_URLS;
+  if (PUBLIC_NODE_URLS.length > 0) {
+    return [...new Set(PUBLIC_NODE_URLS.map(u => u.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')))];
+  }
+  const configured = PEER_URLS;
   const siblings = configured.map(u => u.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
   return [...new Set([self, ...siblings])];
 }
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
+
+function requestOrigin(req: IncomingMessage): string {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '')
+    .split(',')[0]
+    .trim();
+  const protocol = forwardedProto === 'https' ? 'https' : 'http';
+  const forwardedHost = String(req.headers['x-forwarded-host'] ?? '')
+    .split(',')[0]
+    .trim();
+  const candidate = forwardedHost || String(req.headers.host ?? '').trim();
+  const host = candidate && !/[\\/\s]/.test(candidate)
+    ? candidate
+    : `${getLocalIP()}:${PORT}`;
+
+  return `${protocol}://${host}`;
+}
 
 const httpServer = http.createServer((req, res) => {
   let urlPath = (req.url ?? '/').split('?')[0];
@@ -145,7 +171,7 @@ const httpServer = http.createServer((req, res) => {
   if (urlPath === '/api/info') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      joinUrl:       `http://${getLocalIP()}:${PORT}/join`,
+      joinUrl:       `${requestOrigin(req)}/join`,
       nodeId:        NODE_ID,
       isCoordinator: cluster.isCoordinator,
       coordinator:   cluster.coordinatorId,

@@ -32,17 +32,17 @@ RESUMEN POR TEMATICA
 
   FACIL      (<=5 letras)   -   5 palabras
   --------------------------------------------------------------------------
-    [*] RATON         (5 letras)   pista: Se desplaza sobre una superficie para controlar el puntero.
-    [*] PLACA         (5 letras)   pista: Sirve como base para conectar los componentes internos.
-    [*] TECLA         (5 letras)   pista: Cada una representa una entrada que se presiona con los dedos.
+    [*]       (5 letras)   pista: Se desplaza sobre una superficie para controlar el puntero.
+    [*]         (5 letras)   pista: Sirve como base para conectar los componentes internos.
+    [*]       (5 letras)   pista: Cada una representa una entrada que se presiona con los dedos.
     [*] PILA          (4 letras)   pista: Guarda energía para que un aparato funcione sin enchufe.
     [*] PIXEL         (5 letras)   pista: Es la unidad de color más pequeña que ves en una pantalla.
 
   INTERMEDIO (6-8 letras)   -   8 palabras
   --------------------------------------------------------------------------
-    [*] LAPTOP        (6 letras)   pista: Combina pantalla y teclado en un equipo que se puede transportar.
-    [*] WEBCAM        (6 letras)   pista: Captura video para llamadas y transmisiones desde un equipo.
-    [*] MONITOR       (7 letras)   pista: Muestra de forma visual lo que procesa el equipo.
+    [*]        (6 letras)   pista: Combina pantalla y teclado en un equipo que se puede transportar.
+    [*]        (6 letras)   pista: Captura video para llamadas y transmisiones desde un equipo.
+    [*]       (7 letras)   pista: Muestra de forma visual lo que procesa el equipo.
     [*] TECLADO       (7 letras)   pista: Permite escribir mediante un conjunto ordenado de piezas.
     [*] MEMORIA       (7 letras)   pista: Mantiene datos disponibles mientras se realizan tareas.
     [*] PARLANTE      (8 letras)   pista: Convierte señales eléctricas en sonido audible.
